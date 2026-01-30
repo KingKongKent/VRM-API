@@ -1,9 +1,8 @@
-[![HACS validation](https://img.shields.io/github/actions/workflow/status/jayjojayson/hass-victron-vrm-api/validate.yml?label=HACS%20Validation)](https://github.com/jayjojayson/hass-victron-vrm-api/actions?query=workflow%3Avalidate)
+[![HACS validation](https://img.shields.io/github/actions/workflow/status/KingKongKent/VRM-API/validate.yml?label=HACS%20Validation)](https://github.com/KingKongKent/VRM-API/actions?query=workflow%3Avalidate)
 [![hacs_badge](https://img.shields.io/badge/HACS-Default%20✔-brightgreen.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/release/jayjojayson/hass-victron-vrm-api?include_prereleases=&sort=semver&color=blue)](https://github.com/jayjojayson/hass-victron-vrm-api/releases/)
-[![GH-code-size](https://img.shields.io/github/languages/code-size/jayjojayson/hass-victron-vrm-api?color=blue)](https://github.com/jayjojayson/hass-victron-vrm-api)
-[![README Deutsch](https://img.shields.io/badge/README-Deutsch-orange)](https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/README_deutsch.md)
-![stars](https://img.shields.io/github/stars/jayjojayson/hass-victron-vrm-api)
+[![GitHub release](https://img.shields.io/github/release/KingKongKent/VRM-API?include_prereleases=&sort=semver&color=blue)](https://github.com/KingKongKent/VRM-API/releases/)
+[![GH-code-size](https://img.shields.io/github/languages/code-size/KingKongKent/VRM-API?color=blue)](https://github.com/KingKongKent/VRM-API)
+![stars](https://img.shields.io/github/stars/KingKongKent/VRM-API)
 
 # Victron VRM API 
 Victron VRM API Integration for Home Assistant
@@ -125,7 +124,7 @@ If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗
 
   <details>
    <summary> <b>"How to" - Site_ID, Instance Number, Token</b></summary>  
-   <img width="3161" height="1111" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/vrm-api-description.png" />
+   <img width="3161" height="1111" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/vrm-api-description.png" />
   </details>
 
 ## 📥 Installing the Integration
@@ -134,7 +133,7 @@ If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗
 
 - Simply follow the Link to integrate this repository to HACS
   
- [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jayjojayson&repository=hass-victron-vrm-api&category=integration)
+ [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=KingKongKent&repository=VRM-API&category=integration)
 - go to `Settings -> Devices and Services -> Integration`
 - click on `Add Integration`
 - search for `victron vrm api` or short `vrm`
@@ -153,15 +152,15 @@ If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗
 
 ## ✅ How it looks in HA
 
-<img width="1084" height="513" alt="baaf71fc1a0bd487e77f43b7fb7b184def05f512" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/victron-vrm-api.png" />
+<img width="1084" height="513" alt="baaf71fc1a0bd487e77f43b7fb7b184def05f512" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/victron-vrm-api.png" />
 
   <details>
    <summary> <b>Pictures of Devices inside the Ingration</b></summary>  
-   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/Config_Menu.png" />
-   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/Battery.png" />
-   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/Multiplus.png" />
-   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/PV_Inverter.png" />
-   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/jayjojayson/hass-victron-vrm-api/blob/main/docs/Overall.png" />
+   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/Config_Menu.png" />
+   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/Battery.png" />
+   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/Multiplus.png" />
+   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/PV_Inverter.png" />
+   <img width="320" height="500" alt="vrm-api-Erklärung" src="https://github.com/KingKongKent/VRM-API/blob/main/docs/Overall.png" />
   </details>
 
   <details>
