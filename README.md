@@ -16,20 +16,21 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 ### Overview Devices
 | Device Type | Number of Sensors |
 | :--- | :---: |
-| **Battery** | 33 |
+| **Battery** | 34 |
 | **MultiPlus** | 11 |
 | **PV Inverter** | 16 |
 | **Tank** | 6 |
 | **Solar Charger** | 7 |
 | **Overall Stats** | 16 |
 | **System Overview** | 10 per device |
-| **Total** | 99+ |
+| **Total** | 100+ |
 
 ### Sensor Details
 | Device Type | Sensor Name | VRM ID / Key | Unit | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **Battery** | State of charge | `51` | % | State of Charge (SOC) |
 | **Battery** | Voltage | `47` | V | Battery Voltage |
+| **Battery** | Starter Battery Voltage | `48` | V | Starter Battery Voltage |
 | **Battery** | Current | `49` | A | Battery Current |
 | **Battery** | Consumed Amphours | `50` | Ah | Consumed Amphours |
 | **Battery** | Time to go | `52` | h | Time to go until empty |
