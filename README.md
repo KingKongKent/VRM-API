@@ -8,9 +8,7 @@
 Victron VRM API Integration for Home Assistant
 
 This integration use the Victron VRM Portal to get Data from the API. All you need for Setup are some Numbers from your VRM Portal.
-At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank and Solar Charger. Also you get the Overall Stats for the Day, Week, Month and Year. I'm working on it, to get some more Data from the victron API.
-
-If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗 
+At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank and Solar Charger. Also you get the Overall Stats for the Day, Week, Month and Year, plus System Overview information for all detected devices. I'm working on it, to get some more Data from the victron API.
 
 <details>
    <summary> <b>VRM API supported Devices and Sensors</b></summary> 
@@ -24,7 +22,8 @@ If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗
 | **Tank** | 6 |
 | **Solar Charger** | 7 |
 | **Overall Stats** | 16 |
-| **Total** | 89 |
+| **System Overview** | 10 per device |
+| **Total** | 99+ |
 
 ### Sensor Details
 | Device Type | Sensor Name | VRM ID / Key | Unit | Description |
@@ -112,8 +111,20 @@ If you like the Integration, I would appreciate a Star rating ⭐ from you. 🤗
 | **Overall Stats** | * Total Consumption | `total_consumption` | kWh | Total Consumption (for selected period) |
 | **Overall Stats** | * Grid Energy In | `grid_history_from` | kWh | Energy from Grid (for selected period) |
 | **Overall Stats** | * Grid Energy Out | `grid_history_to` | kWh | Energy to Grid (for selected period) |
+| --- | --- | --- | --- | --- |
+| **System Overview** | Firmware | `firmwareVersion` | - | Device firmware version |
+| **System Overview** | Last Connection | `lastConnection` | - | Last connection timestamp |
+| **System Overview** | Product Name | `productName` | - | Device product name |
+| **System Overview** | Remote IP | `remoteOnLan` | - | Remote IP address |
+| **System Overview** | Connection Info | `connectionInformation` | - | Connection details |
+| **System Overview** | Auto Update | `autoUpdate` | - | Auto-update status |
+| **System Overview** | Battery Family | `batteryFamily` | - | Battery family type |
+| **System Overview** | Battery Manufacturer | `batteryManufacturer` | - | Battery manufacturer |
+| **System Overview** | Serial Number | `machineSerialNumber` | - | Device serial number |
+| **System Overview** | Instance ID | `instance` | - | Device instance ID |
 
 *(The **Overall Stats** Entities are build for Periods **Today, Week, Month and Year**.)*
+*(The **System Overview** provides device information for all detected devices in your VRM installation.)*
 
 </details>
 
