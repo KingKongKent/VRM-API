@@ -4,12 +4,16 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType
+import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN 
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"] 
+
+# Integration only supports config flow (UI setup), no YAML configuration
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN) 
 
 # NOTE: async_reload_entry und der Update Listener sind entfernt.
 
