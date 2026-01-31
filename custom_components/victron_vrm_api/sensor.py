@@ -462,8 +462,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "ac_out_power_l2": ("30", "AC Output Power L2", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
         "ac_out_power_l3": ("31", "AC Output Power L3", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
         "dc_voltage": ("32", "DC Bus Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:current-dc"),
-        "dc_current": ("33", "DC Bus Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"), 
+        "dc_current": ("33", "DC Bus Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
+        "active_input": ("35", "Active Input Source", None, None, None, "mdi:power-plug"),
         "inverter_state": ("40", "VE.Bus State", None, None, None, "mdi:flash"),
+        "switch_position": ("44", "Switch Position", None, None, None, "mdi:light-switch"),
+        "grid_setpoint": ("242", "Grid Setpoint", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower-export"),
+        "soc_limit": ("243", "SOC Limit", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, "%", "mdi:battery-lock"),
+        "active_soc_limit": ("244", "Active SOC Limit", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, "%", "mdi:battery-lock-open"),
         "multi_temp": ("521", "MultiPlus Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
     }
     

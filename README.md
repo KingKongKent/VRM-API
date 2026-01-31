@@ -17,13 +17,13 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 | Device Type | Number of Sensors |
 | :--- | :---: |
 | **Battery** | 35 |
-| **MultiPlus** | 25 |
+| **MultiPlus** | 29 |
 | **PV Inverter** | 16 |
 | **Tank** | 6 |
 | **Solar Charger** | 11 |
 | **Overall Stats** | 16 |
 | **System Overview** | 10 per device |
-| **Total** | 130+ |
+| **Total** | 134+ |
 
 ### Sensor Details
 | Device Type | Sensor Name | VRM ID / Key | Unit | Description |
@@ -86,7 +86,12 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 | **MultiPlus** | AC Output Power L3 | `31` | W | AC Output Power Phase 3 |
 | **MultiPlus** | DC Bus Voltage | `32` | V | DC Bus Voltage |
 | **MultiPlus** | DC Bus Current | `33` | A | DC Bus Current |
+| **MultiPlus** | Active Input Source | `35` | - | Active AC Input (Grid/Generator/Shore) |
 | **MultiPlus** | VE.Bus State | `40` | - | Operating State (e.g., Inverting) |
+| **MultiPlus** | Switch Position | `44` | - | Charger/Inverter/On/Off |
+| **MultiPlus** | Grid Setpoint | `242` | W | ESS Grid Setpoint Target |
+| **MultiPlus** | SOC Limit | `243` | % | ESS Minimum SOC Limit |
+| **MultiPlus** | Active SOC Limit | `244` | % | ESS Active SOC Limit |
 | **MultiPlus** | MultiPlus Temperature | `521` | °C | Device Temperature |
 | **MultiPlus** | DC Bus Power | *(Calculated)* | W | Current DC Power (V*A) |
 | **MultiPlus** | Grid to Consumers (Today) | `Gc` | kWh | Energy from Grid to Load (Today) |
