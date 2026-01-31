@@ -329,6 +329,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "temp": ("115", "Battery Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
         "min_cell_voltage": ("173", "Minimum Cell Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-low"),
         "max_cell_voltage": ("174", "Maximum Cell Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-high"),
+        "mid_voltage": ("64", "Mid Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-medium"),
         "charge_cycles": ("58", "Charge Cycles", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:battery-sync"),
     }
     
@@ -440,10 +441,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # --- 3. MultiPlus Status Sensoren ---
     multi_status_sensors_config = {
-        "ac_in_voltage": ("8", "AC Input Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
-        "ac_in_power": ("17", "AC Input Power L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower"),
-        "ac_out_voltage": ("20", "AC Output Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
-        "ac_out_power": ("29", "AC Output Power L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
+        "ac_in_frequency": ("6", "AC Input Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
+        "ac_in_voltage_l1": ("8", "AC Input Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
+        "ac_in_voltage_l2": ("9", "AC Input Voltage L2", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
+        "ac_in_voltage_l3": ("10", "AC Input Voltage L3", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
+        "ac_in_current_l1": ("11", "AC Input Current L1", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_in_current_l2": ("12", "AC Input Current L2", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_in_current_l3": ("13", "AC Input Current L3", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_in_power_l1": ("17", "AC Input Power L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower"),
+        "ac_in_power_l2": ("18", "AC Input Power L2", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower"),
+        "ac_in_power_l3": ("19", "AC Input Power L3", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower"),
+        "ac_out_voltage_l1": ("20", "AC Output Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
+        "ac_out_voltage_l2": ("21", "AC Output Voltage L2", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
+        "ac_out_voltage_l3": ("22", "AC Output Voltage L3", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
+        "ac_out_frequency": ("23", "AC Output Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
+        "ac_out_current_l1": ("14", "AC Output Current L1", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_current_l2": ("15", "AC Output Current L2", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_current_l3": ("16", "AC Output Current L3", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_power_l1": ("29", "AC Output Power L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
+        "ac_out_power_l2": ("30", "AC Output Power L2", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
+        "ac_out_power_l3": ("31", "AC Output Power L3", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
         "dc_voltage": ("32", "DC Bus Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:current-dc"),
         "dc_current": ("33", "DC Bus Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"), 
         "inverter_state": ("40", "VE.Bus State", None, None, None, "mdi:flash"),
@@ -569,13 +586,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # --- 3.9. Solar Charger Sensoren ---
     solar_charger_sensors_config = {
-        "battery_watts":   ("107", "Battery Watts",     SensorDeviceClass.POWER,     SensorStateClass.MEASUREMENT,      "W",   "mdi:battery-charging-90"),
         "battery_voltage": ("81",  "Battery Voltage",   SensorDeviceClass.VOLTAGE,   SensorStateClass.MEASUREMENT,      "V",   "mdi:current-dc"),
-        "charge_state":    ("85",  "Charge State",      None,                        None,                              None,  "mdi:solar-power"),
+        "pv_voltage":      ("82",  "PV Voltage",        SensorDeviceClass.VOLTAGE,   SensorStateClass.MEASUREMENT,      "V",   "mdi:solar-panel"),
         "battery_temp":    ("83",  "Battery Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT,  "°C",  "mdi:thermometer"),
-        "yield_today":     ("94",  "Yield Today",       SensorDeviceClass.ENERGY,    SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:solar-power"),
-        "yield_yesterday": ("96",  "Yield Yesterday",   SensorDeviceClass.ENERGY,    SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:solar-panel"),
+        "pv_current":      ("84",  "PV Current",        SensorDeviceClass.CURRENT,   SensorStateClass.MEASUREMENT,      "A",   "mdi:current-dc"),
+        "charge_state":    ("85",  "Charge State",      None,                        None,                              None,  "mdi:solar-power"),
+        "error_code":      ("88",  "Error Code",        None,                        None,                              None,  "mdi:alert-circle"),
         "relay_status":    ("90",  "Relay Status",      None,                        None,                              None,  "mdi:electric-switch"),
+        "yield_today":     ("94",  "Yield Today",       SensorDeviceClass.ENERGY,    SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:solar-power"),
+        "max_power_today": ("95",  "Max Power Today",   SensorDeviceClass.POWER,     SensorStateClass.MEASUREMENT,      "W",   "mdi:solar-power-variant"),
+        "yield_yesterday": ("96",  "Yield Yesterday",   SensorDeviceClass.ENERGY,    SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:solar-panel"),
+        "battery_watts":   ("107", "Battery Watts",     SensorDeviceClass.POWER,     SensorStateClass.MEASUREMENT,      "W",   "mdi:battery-charging-90"),
     }
 
     for instance_id, data in device_data["solar_charger"].items():

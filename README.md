@@ -16,14 +16,14 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 ### Overview Devices
 | Device Type | Number of Sensors |
 | :--- | :---: |
-| **Battery** | 34 |
-| **MultiPlus** | 11 |
+| **Battery** | 35 |
+| **MultiPlus** | 25 |
 | **PV Inverter** | 16 |
 | **Tank** | 6 |
-| **Solar Charger** | 7 |
+| **Solar Charger** | 11 |
 | **Overall Stats** | 16 |
 | **System Overview** | 10 per device |
-| **Total** | 100+ |
+| **Total** | 130+ |
 
 ### Sensor Details
 | Device Type | Sensor Name | VRM ID / Key | Unit | Description |
@@ -37,6 +37,7 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 | **Battery** | Battery Temperature | `115` | °C | Battery Temperature |
 | **Battery** | Minimum Cell Voltage | `173` | V | Minimum Cell Voltage (BMS) |
 | **Battery** | Maximum Cell Voltage | `174` | V | Maximum Cell Voltage (BMS) |
+| **Battery** | Mid Voltage | `64` | V | Mid Point Voltage |
 | **Battery** | Battery Power | *(Calculated)* | W | Current Power (V*A) |
 | **Battery** | Battery Charge Cycles | `58` | - | Full Charge Cycles |
 | **Battery** | Battery to Consumers (Today) | `Bc` | kWh | Energy to Load (Today) |
@@ -63,10 +64,26 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 | **Battery** | Charge blocked | `739` | - | Charging blocked (BMS) |
 | **Battery** | Discharge blocked | `740` | - | Discharging blocked (BMS) |
 | --- | --- | --- | --- | --- |
+| **MultiPlus** | AC Input Frequency | `6` | Hz | AC Input Frequency |
 | **MultiPlus** | AC Input Voltage L1 | `8` | V | AC Input Voltage Phase 1 |
+| **MultiPlus** | AC Input Voltage L2 | `9` | V | AC Input Voltage Phase 2 |
+| **MultiPlus** | AC Input Voltage L3 | `10` | V | AC Input Voltage Phase 3 |
+| **MultiPlus** | AC Input Current L1 | `11` | A | AC Input Current Phase 1 |
+| **MultiPlus** | AC Input Current L2 | `12` | A | AC Input Current Phase 2 |
+| **MultiPlus** | AC Input Current L3 | `13` | A | AC Input Current Phase 3 |
 | **MultiPlus** | AC Input Power L1 | `17` | W | AC Input Power Phase 1 |
+| **MultiPlus** | AC Input Power L2 | `18` | W | AC Input Power Phase 2 |
+| **MultiPlus** | AC Input Power L3 | `19` | W | AC Input Power Phase 3 |
 | **MultiPlus** | AC Output Voltage L1 | `20` | V | AC Output Voltage Phase 1 |
+| **MultiPlus** | AC Output Voltage L2 | `21` | V | AC Output Voltage Phase 2 |
+| **MultiPlus** | AC Output Voltage L3 | `22` | V | AC Output Voltage Phase 3 |
+| **MultiPlus** | AC Output Frequency | `23` | Hz | AC Output Frequency |
+| **MultiPlus** | AC Output Current L1 | `14` | A | AC Output Current Phase 1 |
+| **MultiPlus** | AC Output Current L2 | `15` | A | AC Output Current Phase 2 |
+| **MultiPlus** | AC Output Current L3 | `16` | A | AC Output Current Phase 3 |
 | **MultiPlus** | AC Output Power L1 | `29` | W | AC Output Power Phase 1 |
+| **MultiPlus** | AC Output Power L2 | `30` | W | AC Output Power Phase 2 |
+| **MultiPlus** | AC Output Power L3 | `31` | W | AC Output Power Phase 3 |
 | **MultiPlus** | DC Bus Voltage | `32` | V | DC Bus Voltage |
 | **MultiPlus** | DC Bus Current | `33` | A | DC Bus Current |
 | **MultiPlus** | VE.Bus State | `40` | - | Operating State (e.g., Inverting) |
@@ -100,13 +117,17 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 | **Tank** | Status | `443` | - | Tank Status (e.g., OK) |
 | **Tank** | Custom Name | `638` | - | User Defined Name |
 | --- | --- | --- | --- | --- |
-| **Solar Charger** | Battery Watts | `107` | W | Charging Power to Battery |
 | **Solar Charger** | Battery Voltage | `81` | V | Battery Voltage |
-| **Solar Charger** | Charge State | `85` | - | Charger State (e.g., Bulk, Float) |
+| **Solar Charger** | PV Voltage | `82` | V | Solar Panel Voltage |
 | **Solar Charger** | Battery Temperature | `83` | °C | Battery Temperature (external) |
-| **Solar Charger** | Yield Today | `94` | kWh | Energy Yield Today |
-| **Solar Charger** | Yield Yesterday | `96` | kWh | Energy Yield Yesterday |
+| **Solar Charger** | PV Current | `84` | A | Solar Panel Current |
+| **Solar Charger** | Charge State | `85` | - | Charger State (e.g., Bulk, Float) |
+| **Solar Charger** | Error Code | `88` | - | Error Code (if any) |
 | **Solar Charger** | Relay Status | `90` | - | Relay State |
+| **Solar Charger** | Yield Today | `94` | kWh | Energy Yield Today |
+| **Solar Charger** | Max Power Today | `95` | W | Maximum Power Today |
+| **Solar Charger** | Yield Yesterday | `96` | kWh | Energy Yield Yesterday |
+| **Solar Charger** | Battery Watts | `107` | W | Charging Power to Battery |
 | --- | --- | --- | --- | --- |
 | **Overall Stats** | * Total Solar Yield | `total_solar_yield` | kWh | Total PV Yield (for selected period) |
 | **Overall Stats** | * Total Consumption | `total_consumption` | kWh | Total Consumption (for selected period) |
