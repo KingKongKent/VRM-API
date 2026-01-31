@@ -79,6 +79,10 @@ class VrmDataCoordinator(DataUpdateCoordinator):
                     if "totals" in data:
                         return data
                     
+                    # IMPORTANT: Diagnostics endpoint needs full response with success + records
+                    if self.endpoint == "diagnostics":
+                        return data
+                    
                     # IMPORTANT: System Overview has a 'records' -> 'devices' structure
                     if "records" in data and "devices" in data["records"]:
                         return data["records"]
@@ -137,7 +141,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Define endpoints (static endpoints)
     overall_endpoint = "overallstats"
     stats_endpoint = "stats?type=kwh&interval=15mins"
-    system_overview_endpoint = "system-overview" # NEW
+    system_overview_endpoint = "system-overview"
+    diagnostics_endpoint = "diagnostics" # NEW - comprehensive system data
 
     # Initialize coordinators (always present)
     overall_stats_coord = VrmDataCoordinator(
@@ -146,9 +151,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     stats_coord = VrmDataCoordinator(
         hass, site_id, token, stats_endpoint, "VRM Energy Stats", DEFAULT_SCAN_INTERVAL_OVERALL
     )
-    # Neuer Coordinator für System Overview
+    # Coordinator for System Overview
     system_overview_coord = VrmDataCoordinator(
         hass, site_id, token, system_overview_endpoint, "VRM System Overview", DEFAULT_SCAN_INTERVAL_SYSTEM_OVERVIEW
+    )
+    # NEW - Coordinator for Diagnostics (extended sensor data)
+    diagnostics_coord = VrmDataCoordinator(
+        hass, site_id, token, diagnostics_endpoint, "VRM Diagnostics", DEFAULT_SCAN_INTERVAL_OVERALL
     )
 
     # Dictionary to store coordinators and device info per instance ID
@@ -306,8 +315,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             }
         }
     
-    # Execute initial refresh (including system_overview_coord)
-    all_coordinators = [overall_stats_coord, stats_coord, system_overview_coord] + dynamic_coordinators
+    # Execute initial refresh (including diagnostics_coord)
+    all_coordinators = [overall_stats_coord, stats_coord, system_overview_coord, diagnostics_coord] + dynamic_coordinators
     for coordinator in all_coordinators:
         try:
             await coordinator.async_config_entry_first_refresh()
@@ -326,9 +335,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "current": ("49", "Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
         "consumed": ("50", "Consumed Amphours", None, SensorStateClass.TOTAL_INCREASING, "Ah", "mdi:battery-alert-variant-outline"),
         "ttg": ("52", "Time to go", None, SensorStateClass.MEASUREMENT, "h", "mdi:timer-sand"),
-        "temp": ("115", "Battery Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
-        "min_cell_voltage": ("173", "Minimum Cell Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-low"),
-        "max_cell_voltage": ("174", "Maximum Cell Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-high"),
         "mid_voltage": ("64", "Mid Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-medium"),
         "charge_cycles": ("58", "Charge Cycles", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:battery-sync"),
     }
@@ -345,8 +351,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Standard summary sensors
         for key, (data_id, name, device_class, state_class, unit, icon) in battery_sensors_config.items():
             
-            # IMPORTANT: Select the correct coordinator
+            # IMPORTANT: Select the correct coordinator based on sensor type
             if key == "charge_cycles":
+                active_coord = history_coord
+            elif key == "mid_voltage":
                 active_coord = history_coord
             else:
                 active_coord = summary_coord
@@ -355,7 +363,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if active_coord.data and active_coord.data.get("data"):
                 actual_data = active_coord.data.get("data", {})
                 
-                # Check if the specific ID (e.g. 58) exists in the data
+                # Check if the specific ID exists in the data
                 if data_id in actual_data:
                     entities.append(
                         VrmBatterySummarySensor(
@@ -710,6 +718,95 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                         )
                     )
 
+    # --- 6. NEW: Diagnostics Sensors (Extended System Data) ---
+    if diagnostics_coord.data and "records" in diagnostics_coord.data:
+        diagnostics_records = diagnostics_coord.data["records"]
+        
+        # Useful battery diagnostics (history/stats not in widget)
+        battery_diagnostics_config = {
+            "55": ("Deepest discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-arrow-down"),
+            "56": ("Last discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-minus"),
+            "57": ("Average discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-50"),
+            "60": ("Total Ah drawn", SensorDeviceClass.ENERGY, "Ah", "mdi:counter"),
+            "61": ("Minimum voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:battery-low"),
+            "62": ("Maximum voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:battery-high"),
+            "63": ("Time since last full charge", None, "s", "mdi:clock-outline"),
+        }
+        
+        # Solar charger diagnostics
+        solar_diagnostics_config = {
+            "86": ("PV Voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:solar-panel"),
+            "97": ("Max Power Yesterday", SensorDeviceClass.POWER, "W", "mdi:solar-power-variant"),
+            "98": ("Error Code", None, None, "mdi:alert-circle"),
+            "442": ("PV Power", SensorDeviceClass.POWER, "W", "mdi:solar-power"),
+            "518": ("MPPT State", None, None, "mdi:state-machine"),
+        }
+        
+        # MultiPlus diagnostics  
+        multi_diagnostics_config = {
+            "27": ("Active Input Current Limit", SensorDeviceClass.CURRENT, "A", "mdi:current-ac"),
+            "41": ("VE.Bus Error", None, None, "mdi:alert-circle"),
+            "43": ("Low Battery", None, None, "mdi:battery-alert"),
+            "557": ("Charge State", None, None, "mdi:battery-charging"),
+        }
+        
+        # Add battery diagnostics
+        for instance_id, data in device_data["battery"].items():
+            dev_info = data['device_info']
+            for data_id, (name, device_class, unit, icon) in battery_diagnostics_config.items():
+                # Find matching record in diagnostics
+                for record in diagnostics_records:
+                    if (str(record.get("idDataAttribute")) == data_id and 
+                        record.get("instance") == instance_id):
+                        entities.append(
+                            VrmDiagnosticSensor(
+                                diagnostics_coord, site_id,
+                                f"diag_{data_id}_{instance_id}",
+                                data_id, instance_id, name,
+                                device_class, SensorStateClass.MEASUREMENT if device_class else None,
+                                unit, icon, dev_info
+                            )
+                        )
+                        break
+        
+        # Add solar charger diagnostics
+        for instance_id, data in device_data["solar_charger"].items():
+            dev_info = data['device_info']
+            for data_id, (name, device_class, unit, icon) in solar_diagnostics_config.items():
+                # Find matching record in diagnostics
+                for record in diagnostics_records:
+                    if (str(record.get("idDataAttribute")) == data_id and 
+                        record.get("instance") == instance_id):
+                        entities.append(
+                            VrmDiagnosticSensor(
+                                diagnostics_coord, site_id,
+                                f"diag_{data_id}_{instance_id}",
+                                data_id, instance_id, name,
+                                device_class, SensorStateClass.MEASUREMENT if device_class else None,
+                                unit, icon, dev_info
+                            )
+                        )
+                        break
+        
+        # Add MultiPlus diagnostics
+        for instance_id, data in device_data["multi"].items():
+            dev_info = data['device_info']
+            for data_id, (name, device_class, unit, icon) in multi_diagnostics_config.items():
+                # Find matching record in diagnostics
+                for record in diagnostics_records:
+                    if (str(record.get("idDataAttribute")) == data_id and 
+                        record.get("instance") == instance_id):
+                        entities.append(
+                            VrmDiagnosticSensor(
+                                diagnostics_coord, site_id,
+                                f"diag_{data_id}_{instance_id}",
+                                data_id, instance_id, name,
+                                device_class, SensorStateClass.MEASUREMENT if device_class else None,
+                                unit, icon, dev_info
+                            )
+                        )
+                        break
+
     async_add_entities(entities, True)
 
 
@@ -731,7 +828,29 @@ class VrmBaseSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit
         self._attr_icon = icon
-        self._attr_device_info = device_info 
+        self._attr_device_info = device_info
+        
+        # Set display precision based on device class and unit
+        if device_class == SensorDeviceClass.VOLTAGE:
+            self._attr_suggested_display_precision = 2
+        elif device_class == SensorDeviceClass.CURRENT:
+            self._attr_suggested_display_precision = 2
+        elif device_class == SensorDeviceClass.POWER:
+            self._attr_suggested_display_precision = 1
+        elif device_class == SensorDeviceClass.ENERGY:
+            self._attr_suggested_display_precision = 3
+        elif device_class == SensorDeviceClass.FREQUENCY:
+            self._attr_suggested_display_precision = 2
+        elif device_class == SensorDeviceClass.TEMPERATURE:
+            self._attr_suggested_display_precision = 1
+        elif device_class == SensorDeviceClass.BATTERY:
+            self._attr_suggested_display_precision = 1
+        elif unit == "Ah":
+            self._attr_suggested_display_precision = 2
+        elif unit == "h":
+            self._attr_suggested_display_precision = 1
+        elif unit == "%":
+            self._attr_suggested_display_precision = 1 
 
 # --- 6. Battery Summary Sensor ---------------------------------------------------
 class VrmBatterySummarySensor(VrmBaseSensor):
@@ -1040,3 +1159,41 @@ class VrmSystemOverviewSensor(VrmBaseSensor):
         
         # Value can be False, 0, None, String or Int. We return it unchanged.
         return value
+
+# --- 13. NEW: Diagnostic Sensor (from diagnostics endpoint) -------------------
+class VrmDiagnosticSensor(VrmBaseSensor):
+    """Represents a sensor from the VRM diagnostics endpoint."""
+    def __init__(self, coordinator, site_id, key, data_id, instance, name, device_class, state_class, unit, icon, device_info):
+        super().__init__(coordinator, site_id, key, name, device_class, state_class, unit, icon, device_info)
+        self._data_id = str(data_id)
+        self._instance = instance
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data or "records" not in self.coordinator.data:
+            return None
+        
+        records = self.coordinator.data["records"]
+        
+        # Find matching record by data_id and instance
+        for record in records:
+            if (str(record.get("idDataAttribute")) == self._data_id and 
+                record.get("instance") == self._instance):
+                
+                # Try formattedValue first (includes unit)
+                formatted = record.get("formattedValue")
+                if formatted:
+                    # Strip unit suffix if present
+                    try:
+                        return float(formatted.split()[0])
+                    except (ValueError, IndexError):
+                        return formatted
+                
+                # Fallback to rawValue
+                raw = record.get("rawValue")
+                if raw is not None:
+                    return raw
+                
+                return None
+        
+        return None
