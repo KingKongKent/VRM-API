@@ -67,34 +67,34 @@ class VrmDataCoordinator(DataUpdateCoordinator):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=15) as response:
                     if response.status not in (200, 204):
-                        _LOGGER.error("API-Fehler bei %s: Status %d", self.endpoint, response.status)
-                        raise UpdateFailed(f"API-Fehler bei {self.endpoint}: Status {response.status}")
+                        _LOGGER.error("API error at %s: Status %d", self.endpoint, response.status)
+                        raise UpdateFailed(f"API error at {self.endpoint}: Status {response.status}")
                     
                     if response.status == 204:
                         return None 
 
                     data = await response.json()
 
-                    # WICHTIG: Wenn 'totals' enthalten ist (für stats Endpoint), gib alles zurück.
+                    # IMPORTANT: If 'totals' is present (for stats endpoint), return everything.
                     if "totals" in data:
                         return data
                     
-                    # WICHTIG: System Overview hat eine 'records' -> 'devices' Struktur
+                    # IMPORTANT: System Overview has a 'records' -> 'devices' structure
                     if "records" in data and "devices" in data["records"]:
                         return data["records"]
 
-                    # Standard-Verhalten für Widgets:
+                    # Standard behavior for widgets:
                     if "records" in data:
                         return data.get("records", {})
                         
                     return data 
 
         except aiohttp.ClientError as err:
-            _LOGGER.error("Verbindungsfehler beim Abrufen der Daten für %s: %s", self.endpoint, err)
-            raise UpdateFailed(f"Verbindungsfehler: {err}")
+            _LOGGER.error("Connection error while fetching data for %s: %s", self.endpoint, err)
+            raise UpdateFailed(f"Connection error: {err}")
         except Exception as err:
-            _LOGGER.error("Unbekannter Fehler beim Abrufen der Daten für %s: %s", self.endpoint, err)
-            raise UpdateFailed(f"Unbekannter Fehler: {err}")
+            _LOGGER.error("Unknown error while fetching data for %s: %s", self.endpoint, err)
+            raise UpdateFailed(f"Unknown error: {err}")
 
 
 # --- 2. Hilfsfunktion zur ID-Verarbeitung -----------------------------------------
@@ -106,13 +106,13 @@ def _parse_instance_ids(config_string: str) -> list[int]:
     ids = set()
     for part in config_string.split(','):
         try:
-            # Entferne Leerzeichen und versuche die Umwandlung
+            # Remove whitespace and try to convert
             instance_id = int(part.strip())
-            # 0 ist der Standard/Deaktiviert-Wert, nur > 0 hinzufügen
+            # 0 is the default/disabled value, only add > 0
             if instance_id > 0:
                 ids.add(instance_id)
         except ValueError:
-            _LOGGER.warning("Ungültige Instanz-ID '%s' in der Konfiguration ignoriert.", part.strip())
+            _LOGGER.warning("Invalid instance ID '%s' in configuration ignored.", part.strip())
             continue
     return sorted(list(ids))
 
@@ -134,12 +134,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     solar_charger_instance_ids = _parse_instance_ids(config_data.get(CONF_SOLAR_CHARGER_INSTANCE, ""))
     
     
-    # Endpoints definieren (Statische Endpunkte)
+    # Define endpoints (static endpoints)
     overall_endpoint = "overallstats"
     stats_endpoint = "stats?type=kwh&interval=15mins"
-    system_overview_endpoint = "system-overview" # NEU
+    system_overview_endpoint = "system-overview" # NEW
 
-    # Initialisiere Koordinatoren (Immer vorhanden)
+    # Initialize coordinators (always present)
     overall_stats_coord = VrmDataCoordinator(
         hass, site_id, token, overall_endpoint, "VRM Overall Stats", DEFAULT_SCAN_INTERVAL_OVERALL
     )
@@ -151,7 +151,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         hass, site_id, token, system_overview_endpoint, "VRM System Overview", DEFAULT_SCAN_INTERVAL_SYSTEM_OVERVIEW
     )
 
-    # Dictionary, um Koordinatoren und Geräte-Infos pro Instanz-ID zu speichern
+    # Dictionary to store coordinators and device info per instance ID
     device_data = {
         "battery": {},
         "multi": {},
@@ -160,7 +160,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "solar_charger": {}
     }
 
-    # Definiere das Hub-Gerät (Hauptgerät)
+    # Define the hub device (main device)
     hub_device_info = { 
         "identifiers": {(DOMAIN, site_id)},
         "name": f"VRM Site {site_id}",
@@ -168,7 +168,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "model": "VRM Hub",
     }
     
-    # Definiere das Overall Stats Gerät
+    # Define the overall stats device
     overall_device_info = {
         "identifiers": {(DOMAIN, f"{site_id}_overall")},
         "name": "Stats Overall",
@@ -177,7 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "via_device": (DOMAIN, site_id),
     }
 
-    # Definiere das System Overview Gerät (Das Parent-Device, unter dem alle Entitäten gruppiert werden)
+    # Define the System Overview device (the parent device under which all entities are grouped)
     system_overview_device_info = {
         "identifiers": {(DOMAIN, f"{site_id}_system_overview")},
         "name": "System Overview",
@@ -186,12 +186,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "via_device": (DOMAIN, site_id),
     }
     
-    # Temporäre Liste aller dynamischen Koordinatoren für den initialen Refresh
+    # Temporary list of all dynamic coordinators for initial refresh
     dynamic_coordinators = []
 
-    # --- Initialisiere dynamische Koordinatoren und Geräte-Infos pro Instanz ---
+    # --- Initialize dynamic coordinators and device info per instance ---
     
-    # 1. Batterien (Erweitert um History und Alarms Coordinator)
+    # 1. Batteries (extended with History and Alarms coordinator)
     for instance_id in battery_instance_ids:
         # Standard Battery Summary
         battery_endpoint = f"widgets/BatterySummary?instance={instance_id}"
@@ -201,7 +201,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         )
         dynamic_coordinators.append(battery_summary_coord)
 
-        # History Data (für Charge Cycles)
+        # History Data (for Charge Cycles)
         history_endpoint = f"widgets/HistoricData?instance={instance_id}"
         history_coord_name = f"VRM Battery {instance_id} History"
         battery_history_coord = VrmDataCoordinator(
@@ -306,13 +306,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             }
         }
     
-    # Initialen Refresh ausführen (inklusive system_overview_coord)
+    # Execute initial refresh (including system_overview_coord)
     all_coordinators = [overall_stats_coord, stats_coord, system_overview_coord] + dynamic_coordinators
     for coordinator in all_coordinators:
         try:
             await coordinator.async_config_entry_first_refresh()
         except UpdateFailed as err:
-            _LOGGER.warning("Initialer Refresh des %s Koordinators fehlgeschlagen: %s", coordinator.name, err)
+            _LOGGER.warning("Initial refresh of %s coordinator failed: %s", coordinator.name, err)
 
 
     entities: list[SensorEntity] = []
@@ -341,32 +341,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         alarm_coord = data['alarm_coordinator']
         dev_info = data['device_info']
         
-        # Standard Summary Sensoren
+        # Standard summary sensors
         for key, (data_id, name, device_class, state_class, unit, icon) in battery_sensors_config.items():
             
-            # WICHTIG: Auswahl des richtigen Koordinators
+            # IMPORTANT: Select the correct coordinator
             if key == "charge_cycles":
                 active_coord = history_coord
             else:
                 active_coord = summary_coord
 
-            # Prüfen ob Daten im gewählten Koordinator vorhanden sind
+            # Check if data is available in the selected coordinator
             if active_coord.data and active_coord.data.get("data"):
                 actual_data = active_coord.data.get("data", {})
                 
-                # Prüfen ob die spezifische ID (z.B. 58) in den Daten ist
+                # Check if the specific ID (e.g. 58) exists in the data
                 if data_id in actual_data:
                     entities.append(
                         VrmBatterySummarySensor(
                             active_coord, site_id, 
                             f"{key}_{instance_id}", 
                             data_id, 
-                            name, # Friendly Name ohne ID 
+                            name, # Friendly name without ID 
                             device_class, state_class, unit, icon, dev_info
                         )
                     )
         
-        # Power Sensor nutzt immer Summary Coord
+        # Power sensor always uses summary coord
         if summary_coord.data:
             entities.append(
                 VrmBatteryPowerSensor(
@@ -635,48 +635,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
 
         for device in devices_list:
-            # Versuche, eine eindeutige ID zu finden, um Entitäten eindeutig zu benennen
-            # und das Gerät im Daten-Array der API wiederzufinden.
+            # Try to find a unique ID to uniquely name entities
+            # and to find the device in the API data array.
             dev_instance = device.get("instance")
             dev_identifier = device.get("identifier")
             dev_name = device.get("name", "Unknown Device")
             dev_custom_name = device.get("customName")
             
-            # Bestimme den Namen für den Sensor. Wir nutzen den Gerätenamen + Feld-Suffix
+            # Determine the name for the sensor. We use the device name + field suffix
             final_name_prefix = dev_custom_name if dev_custom_name else dev_name
             
-            # Bestimme eindeutige ID für die Entity-ID Generierung und die Wiedererkennung
+            # Determine unique ID for entity ID generation and recognition
             unique_ref = None
             if dev_instance is not None:
-                # Wichtig: Instanz-ID ist nur innerhalb des Gerätetyps eindeutig, 
-                # daher Gerätetyp-ID mit einbeziehen
+                # Important: Instance ID is only unique within the device type, 
+                # so include device type ID
                 current_type_id = device.get('idDeviceType')
                 unique_ref = f"type{current_type_id}_inst{dev_instance}"
             elif dev_identifier:
                 unique_ref = f"id_{dev_identifier}"
             else:
-                # Fallback, falls weder Instanz noch Identifier da sind
+                # Fallback if neither instance nor identifier are present
                 unique_ref = f"type_{device.get('idDeviceType')}_{slugify(dev_name)}"
             
-            # **KEIN** eigenes device_info mehr hier erstellen! 
-            # Stattdessen das übergeordnete `system_overview_device_info` verwenden.
+            # **NO** separate device_info creation here! 
+            # Instead use the parent `system_overview_device_info`.
 
             for field_key, (suffix, dev_class, state_class, unit, icon) in overview_fields.items():
-                # Das Feld muss im aktuellen Gerätedaten-Dictionary vorhanden sein
+                # The field must be present in the current device data dictionary
                 if field_key in device:
                     entities.append(
                         VrmSystemOverviewSensor(
                             system_overview_coord,
                             site_id,
                             f"overview_{unique_ref}_{field_key}", # Unique ID Key
-                            unique_ref, # Referenz zum Wiederfinden des Geräts im Array
-                            field_key, # Welches Feld lesen wir aus
-                            f"{final_name_prefix} {suffix}", # Friendly Name (z.B. "Cerbo GX Firmware")
+                            unique_ref, # Reference to find the device in the array
+                            field_key, # Which field to read
+                            f"{final_name_prefix} {suffix}", # Friendly name (e.g. "Cerbo GX Firmware")
                             dev_class,
                             state_class,
                             unit,
                             icon,
-                            system_overview_device_info # <--- HIER WIRD DAS PARENT DEVICE VERWENDET
+                            system_overview_device_info # <--- PARENT DEVICE IS USED HERE
                         )
                     )
 
@@ -690,9 +690,9 @@ class VrmBaseSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         
         unique_slug = slugify(f"{device_info['name']}_{key}")
-        # Wenn der Sensor unter einem Parent Device gruppiert ist, muss die unique_id anders gebaut werden, 
-        # damit es keine Konflikte gibt (z.B. wenn mehrere Sensoren den gleichen device_info Namen haben)
-        # Für System Overview Sensoren wird der key bereits als einzigartig angenommen.
+        # When the sensor is grouped under a parent device, the unique_id must be constructed differently 
+        # to avoid conflicts (e.g. when multiple sensors have the same device_info name)
+        # For System Overview sensors, the key is already assumed to be unique.
         self._attr_unique_id = f"vrm_v2_{site_id}_{unique_slug}"
         
         self._attr_name = name
@@ -833,7 +833,7 @@ class VrmPvTotalTodaySensor(VrmBaseSensor):
             pb = float(totals.get(self.PB_KEY, 0.0))
             pg = float(totals.get(self.PG_KEY, 0.0))
         except (TypeError, ValueError):
-            _LOGGER.warning("Mindestens ein PV-Wert (Pc, Pb, Pg) ist nicht als Zahl vorhanden.")
+            _LOGGER.warning("At least one PV value (Pc, Pb, Pg) is not available as a number.")
             return 0.0
 
         total_pv = pc + pb + pg
@@ -974,8 +974,8 @@ class VrmSystemOverviewSensor(VrmBaseSensor):
             
         devices = self.coordinator.data["devices"]
         
-        # Wir müssen das Gerät in der Liste wiederfinden.
-        # Wir nutzen die im Setup definierte unique_ref (z.B. "type130_inst1")
+        # We need to find the device in the list.
+        # We use the unique_ref defined in setup (e.g. "type130_inst1")
         
         target_device = None
         for device in devices:
@@ -983,7 +983,7 @@ class VrmSystemOverviewSensor(VrmBaseSensor):
             dev_identifier = device.get("identifier")
             dev_name = device.get("name", "Unknown")
             
-            # Rekonstruktion der Unique Ref (muss mit der Logik im Setup übereinstimmen)
+            # Reconstruction of unique ref (must match the logic in setup)
             current_ref = None
             if dev_instance is not None:
                 current_type_id = device.get('idDeviceType')
@@ -1002,11 +1002,11 @@ class VrmSystemOverviewSensor(VrmBaseSensor):
             
         value = target_device.get(self._json_key)
         
-        # Spezialbehandlung für Zeitstempel
+        # Special handling for timestamps
         if self.device_class == SensorDeviceClass.TIMESTAMP:
             if value is not None and isinstance(value, int):
-                # Umwandlung von UNIX-Timestamp zu datetime object mit UTC Zeitzone
+                # Convert UNIX timestamp to datetime object with UTC timezone
                 return datetime.fromtimestamp(value, tz=timezone.utc)
         
-        # Wert kann False, 0, None, String oder Int sein. Wir geben ihn unverändert zurück.
+        # Value can be False, 0, None, String or Int. We return it unchanged.
         return value
