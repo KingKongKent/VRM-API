@@ -478,19 +478,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     for instance_id, data in device_data["multi"].items():
         coord = data['coordinator']
         dev_info = data['device_info']
-        if coord.data:
+        if coord.data and coord.data.get("data"):
+            actual_data = coord.data.get("data", {})
             for key, (data_id, name, device_class, state_class, unit, icon) in multi_status_sensors_config.items():
+                if data_id in actual_data:
+                    entities.append(
+                        VrmMultiStatusSensor(
+                            coord, site_id, f"{key}_{instance_id}", data_id, name, 
+                            device_class, state_class, unit, icon, dev_info
+                        )
+                    )
+            # Only add DC Power sensor if both voltage and current are available
+            if "32" in actual_data and "33" in actual_data:
                 entities.append(
-                    VrmMultiStatusSensor(
-                        coord, site_id, f"{key}_{instance_id}", data_id, name, 
-                        device_class, state_class, unit, icon, dev_info
+                    VrmMultiPlusDCPowerSensor(
+                        coord, site_id, f"{multi_dc_power_key}_{instance_id}", multi_dc_power_name, dev_info
                     )
                 )
-            entities.append(
-                VrmMultiPlusDCPowerSensor(
-                    coord, site_id, f"{multi_dc_power_key}_{instance_id}", multi_dc_power_name, dev_info
-                )
-            )
 
     # --- 3.5. MultiPlus Additional Stats Sensoren ---
     multi_additional_stats = {
