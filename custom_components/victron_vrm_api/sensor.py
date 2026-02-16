@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import slugify
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -62,36 +63,37 @@ class VrmDataCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
         url = f"{self.base_url}{self.site_id}/{self.endpoint}"
         headers = {"X-Authorization": f"Token {self.token}"}
+        timeout = aiohttp.ClientTimeout(total=15)
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=15) as response:
-                    if response.status not in (200, 204):
-                        _LOGGER.error("API error at %s: Status %d", self.endpoint, response.status)
-                        raise UpdateFailed(f"API error at {self.endpoint}: Status {response.status}")
-                    
-                    if response.status == 204:
-                        return None 
+            session = async_get_clientsession(self.hass)
+            async with session.get(url, headers=headers, timeout=timeout) as response:
+                if response.status not in (200, 204):
+                    _LOGGER.error("API error at %s: Status %d", self.endpoint, response.status)
+                    raise UpdateFailed(f"API error at {self.endpoint}: Status {response.status}")
 
-                    data = await response.json()
+                if response.status == 204:
+                    return None
 
-                    # IMPORTANT: If 'totals' is present (for stats endpoint), return everything.
-                    if "totals" in data:
-                        return data
-                    
-                    # IMPORTANT: Diagnostics endpoint needs full response with success + records
-                    if self.endpoint == "diagnostics":
-                        return data
-                    
-                    # IMPORTANT: System Overview has a 'records' -> 'devices' structure
-                    if "records" in data and "devices" in data["records"]:
-                        return data["records"]
+                data = await response.json()
 
-                    # Standard behavior for widgets:
-                    if "records" in data:
-                        return data.get("records", {})
-                        
-                    return data 
+                # IMPORTANT: If 'totals' is present (for stats endpoint), return everything.
+                if "totals" in data:
+                    return data
+
+                # IMPORTANT: Diagnostics endpoint needs full response with success + records
+                if self.endpoint == "diagnostics":
+                    return data
+
+                # IMPORTANT: System Overview has a 'records' -> 'devices' structure
+                if "records" in data and "devices" in data["records"]:
+                    return data["records"]
+
+                # Standard behavior for widgets:
+                if "records" in data:
+                    return data.get("records", {})
+
+                return data
 
         except aiohttp.ClientError as err:
             _LOGGER.error("Connection error while fetching data for %s: %s", self.endpoint, err)
@@ -320,7 +322,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     for coordinator in all_coordinators:
         try:
             await coordinator.async_config_entry_first_refresh()
-        except UpdateFailed as err:
+        except Exception as err:
             _LOGGER.warning("Initial refresh of %s coordinator failed: %s", coordinator.name, err)
 
 
