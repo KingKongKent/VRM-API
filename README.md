@@ -243,5 +243,4 @@ If sensors show as **Unavailable**:
 ## 📖 Documentation
 
 - **[Full Documentation](documentation.md)** — Complete reference including API details, architecture, development guide
-- **[Deployment Guide](DEPLOY_LOCAL.md)** — How to deploy to a local HA instance
 - **[Developer Instructions](Instructions.md)** — Code architecture and contribution guide
