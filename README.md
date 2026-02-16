@@ -7,8 +7,10 @@
 # Victron VRM API 
 Victron VRM API Integration for Home Assistant
 
-This integration use the Victron VRM Portal to get Data from the API. All you need for Setup are some Numbers from your VRM Portal.
-At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank and Solar Charger. Also you get the Overall Stats for the Day, Week, Month and Year, plus System Overview information for all detected devices. I'm working on it, to get some more Data from the victron API.
+This integration uses the [Victron VRM Portal](https://vrm.victronenergy.com/) to get data from the API. All you need for setup are some numbers from your VRM Portal.
+It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You also get Overall Stats for the Day, Week, Month, and Year, plus System Overview information and Diagnostics for all detected devices.
+
+> 📖 **[Full Documentation](documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
 
 <details>
    <summary> <b>VRM API supported Devices and Sensors</b></summary> 
@@ -175,18 +177,18 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
 - go to `Settings -> Devices and Services -> Integration`
 - click on `Add Integration`
 - search for `victron vrm api` or short `vrm`
-- fill in your Side_ID, Token and Instance_ID for Battery, Multiplus and PV Inverter
+- fill in your Site_ID, Token and Instance_ID for Battery, Multiplus and PV Inverter
 
 #
 ### ➡️ Manual
 
-- dowonload the latetest Release
-- copy the folder "victron-vrm-api" inside your custom_components of Home Assistant
-- restart home assistant
+- Download the [latest Release](https://github.com/KingKongKent/VRM-API/releases)
+- Copy the folder `custom_components/victron_vrm_api/` into your Home Assistant `config/custom_components/` directory
+- Restart Home Assistant
 - go to `Settings -> Devices and Services -> Integration`
 - click on `Add Integration`
 - search for `victron vrm api` or short `vrm`
-- fill in your Side_ID, Token and Instance_ID for Battery, Multiplus and PV Inverter
+- fill in your Site_ID, Token and Instance_ID for Battery, Multiplus and PV Inverter
 
 ## ✅ How it looks in HA
 
@@ -210,3 +212,36 @@ At this Time you can read the Data from Battery, MultiPlus, PV Inverter, Tank an
   - You get the Temperature value with a 1PH Multiplus Setup. With 3Ph Multiplus Setup you dont get this Sensor.
   - You get Data from your 1Ph or 3Ph PV-Inverter. With 3Ph you get some more Sensors.
   </details>
+
+## 📋 Changelog
+
+| Version | Changes |
+| :--- | :--- |
+| **v1.5.9** | Fix aiohttp session/timeout compatibility with HA 2026.2.x |
+| **v1.5.8** | Fix diagnostics endpoint + decimal precision display |
+| **v1.5.6** | Smart sensor creation — only create sensors when data is available |
+| **v1.5.5** | Add MultiPlus ESS sensors (Grid Setpoint, SOC Limits, Switch Position) |
+| **v1.5.4** | Add MultiPlus L2/L3 phases, Solar Charger PV voltage/current, Battery mid-voltage |
+| **v1.5.3** | Add Starter Battery Voltage, System Overview device |
+| **v1.5.2** | HACS default repository registration |
+
+See [documentation.md](documentation.md) for the full changelog with details.
+
+## 🔧 Troubleshooting
+
+If sensors show as **Unavailable**:
+1. Verify your Site ID, Token and Instance IDs are correct
+2. Check HA logs: `Settings → System → Logs` and filter for `victron_vrm_api`
+3. Enable debug logging in `configuration.yaml`:
+   ```yaml
+   logger:
+     logs:
+       custom_components.victron_vrm_api: debug
+   ```
+4. See the [Full Documentation](documentation.md#troubleshooting) for more solutions.
+
+## 📖 Documentation
+
+- **[Full Documentation](documentation.md)** — Complete reference including API details, architecture, development guide
+- **[Deployment Guide](DEPLOY_LOCAL.md)** — How to deploy to a local HA instance
+- **[Developer Instructions](Instructions.md)** — Code architecture and contribution guide
