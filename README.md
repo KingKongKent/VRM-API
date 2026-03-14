@@ -10,6 +10,12 @@ Victron VRM API Integration for Home Assistant
 This integration uses the [Victron VRM Portal](https://vrm.victronenergy.com/) to get data from the API. All you need for setup are some numbers from your VRM Portal.
 It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You also get Overall Stats for the Day, Week, Month, and Year, plus System Overview information and Diagnostics for all detected devices.
 
+### Key Features (v1.6.0)
+- **134+ sensors** — Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, Diagnostics
+- **Instance auto-remap** — If VRM reassigns a device instance ID (e.g., after Cerbo restart), the integration detects this automatically and queries the correct live instance. Your dashboards stay stable.
+- **Reliable enum values** — Charge State, VE.Bus State, and similar status sensors always show the correct value, even when VRM's server-side cache is stale.
+- **Smart sensor creation** — Only creates sensor entities when the VRM API actually returns data for them.
+
 > 📖 **[Full Documentation](docs/documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
 > 📋 **[Inventory](INVENTORY.md)** — Complete file inventory, sensor catalog, and API endpoint map.
 

@@ -2,7 +2,7 @@
 
 ## Project
 Home Assistant custom integration that polls the Victron VRM Portal API.
-Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.5.9
+Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.6.0
 
 ## Repository Layout
 ```
@@ -26,6 +26,8 @@ tests/                   API test/exploration scripts (not shipped)
 5. Config keys live in `const.py`. Scan intervals are there too.
 6. All HTTP calls use `aiohttp` async with 15s timeout. Handle 200, 204, 429 status codes.
 7. Smart sensor creation: only create a sensor entity if the VRM API actually returns data for it.
+8. **Enum resolution**: Always resolve enum values via `dataAttributeEnumValues` + `rawValue` first — VRM's `formattedValue` can be stale server-side.
+9. **Instance auto-remap**: On startup, system-overview + diagnostics are fetched to detect if VRM reassigned a device instance ID. Stale instances are detected by comparing per-record timestamps from diagnostics (`dbusServiceType` → category). Entity unique IDs stay pinned to the configured instance; only API URLs change.
 
 ## API Reference
 - Base URL: `https://vrmapi.victronenergy.com/v2/installations/{site_id}/`
@@ -35,5 +37,5 @@ tests/                   API test/exploration scripts (not shipped)
 ## Conventions
 - Python 3.12+, async/await throughout
 - No YAML configuration — UI config flow only
-- Version bump in both `manifest.json` and `const.py`
+- Version bump in `manifest.json`
 - Changelog in `docs/documentation.md`

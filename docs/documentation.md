@@ -1,6 +1,6 @@
 # Victron VRM API — Full Documentation
 
-> **Version**: 1.5.9 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
+> **Version**: 1.6.0 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
 
 A Home Assistant custom integration that pulls real-time data from the [Victron VRM Portal](https://vrm.victronenergy.com/) API. Supports Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, and Diagnostics devices — creating **134+ sensors** from a single configuration.
 
@@ -307,21 +307,27 @@ docs/                    # Screenshots for README
 ### Component Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  Home Assistant                       │
-│                                                       │
-│  config_flow.py ──► __init__.py ──► sensor.py        │
-│  (UI Setup)        (Entry Point)   (Coordinators     │
-│                                     + Entities)       │
-│                                         │             │
-│                                    VrmDataCoordinator │
-│                                    (one per endpoint) │
-│                                         │             │
-│                               ┌─────────┴──────────┐ │
-│                               ▼                    ▼  │
-│                     async_get_clientsession    VRM API │
-│                     (HA managed session)     (HTTPS)  │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                  Home Assistant                               │
+│                                                               │
+│  config_flow.py ──► __init__.py ──► sensor.py                │
+│  (UI Setup)        (Entry Point)   (Coordinators + Entities) │
+│                                         │                     │
+│                              ┌──────────┤                     │
+│                              ▼          ▼                     │
+│                      system-overview  diagnostics             │
+│                       (device list)  (timestamps)             │
+│                              └────┬─────┘                     │
+│                                   ▼                           │
+│                        _build_instance_remap()                │
+│                     {configured_id → live_id}                 │
+│                                   │                           │
+│                          VrmDataCoordinator                   │
+│                         (one per endpoint)                    │
+│                                   │                           │
+│                     async_get_clientsession ──► VRM API       │
+│                     (HA managed session)       (HTTPS)        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Classes
@@ -445,6 +451,18 @@ The integration uses several layers of error handling:
    ```
 5. **Restart HA**: After a HA update, restart to ensure the integration reloads properly.
 
+### Sensors show stale values (e.g., stuck on "Absorption")
+
+This can happen when VRM caches the `formattedValue` server-side. Since v1.6.0, enum values are resolved from `rawValue` via the `dataAttributeEnumValues` map. Ensure you are running v1.6.0 or later.
+
+### Instance ID changed after firmware update or Cerbo restart
+
+VRM may reassign device instance IDs (e.g., VE.Bus from 291 to 290). Since v1.6.0, the integration auto-detects this using diagnostics timestamps and remaps API calls to the new instance while keeping entity IDs stable. Check the HA log for:
+```
+VRM instance remap for multi: configured 291 → live 290
+```
+If the remap doesn't trigger, verify that both the old and new instances appear in your VRM system-overview.
+
 ### Error `429 Too Many Requests`
 
 The VRM API is rate-limiting your requests. Increase scan intervals in `const.py`:
@@ -557,14 +575,20 @@ After deploying:
 ### Release Checklist
 
 1. Update `manifest.json` version.
-2. Commit changes with a descriptive message: `v1.x.y: Description`.
+2. Commit changes with a descriptive message.
 3. Tag the commit: `git tag v1.x.y`.
 4. Push: `git push origin main --tags`.
-5. HACS will pick up the new tag automatically.
+5. Create a GitHub Release: `gh release create v1.x.y --title "v1.x.y" --notes "Description"`.
+6. HACS will pick up the new release automatically.
 
 ---
 
 ## Changelog
+
+### v1.6.0 — Instance auto-remap + enum resolution fix
+- **Feature**: Automatic instance ID remap — when VRM reassigns a device instance (e.g., VE.Bus 291 → 290 after Cerbo restart), the integration detects this at startup using diagnostics timestamps and automatically queries the correct live instance. Dashboard entities stay stable under their original IDs.
+- **Fix**: Enum values (Charge State, VE.Bus State, etc.) now resolve via `dataAttributeEnumValues` + `rawValue` instead of trusting VRM's `formattedValue`, which can be stale server-side. Fixes sensors stuck on "Absorption" when the actual state is "Float".
+- Both fixes apply to all 5 device sensor classes: MultiPlus, PV Inverter, Tank, Solar Charger, and Diagnostics.
 
 ### v1.5.9 — Fix aiohttp compatibility with HA 2026.2.x
 - **Fix**: Replace raw `aiohttp.ClientSession()` with HA's managed `async_get_clientsession()`.
