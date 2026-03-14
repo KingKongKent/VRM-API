@@ -132,27 +132,62 @@ _VRM_DEVICE_TYPE_MAP = {
     12: "tank",          # Tank sensor
 }
 
+# Diagnostics dbusServiceType → internal category (for freshness detection)
+_VRM_DBUS_SERVICE_MAP = {
+    "vebus": "multi",
+    "battery": "battery",
+    "solarcharger": "solar_charger",
+    "pvinverter": "pv_inverter",
+    "tank": "tank",
+}
+
+
+def _build_freshness_map(diagnostics_data: dict | None) -> dict[str, dict[int, int]]:
+    """Build {category: {instance_id: max_timestamp}} from diagnostics records."""
+    freshness: dict[str, dict[int, int]] = {}
+    if not diagnostics_data:
+        return freshness
+    records = diagnostics_data.get("records", [])
+    for rec in records:
+        svc = rec.get("dbusServiceType")
+        if not svc:
+            continue
+        cat = _VRM_DBUS_SERVICE_MAP.get(svc)
+        if not cat:
+            continue
+        inst = rec.get("instance")
+        ts = rec.get("timestamp", 0) or 0
+        if inst is not None:
+            freshness.setdefault(cat, {})
+            if ts > freshness[cat].get(inst, 0):
+                freshness[cat][inst] = ts
+    return freshness
+
 
 def _build_instance_remap(
     system_overview_data: dict | None,
+    diagnostics_data: dict | None,
     configured: dict[str, list[int]],
 ) -> dict[str, dict[int, int]]:
-    """Map configured instance IDs to live ones using system-overview.
+    """Map configured instance IDs to live ones using system-overview + diagnostics.
 
     Returns a nested dict {category: {configured_id: live_id}}.
-    If a configured ID is still present in the live data it maps to itself.
-    If it disappeared but a new instance of the same device type appeared,
-    the configured ID is remapped by sorted position within that type.
+
+    When VRM reassigns an instance ID, the OLD instance may still appear in
+    system-overview (stale but listed).  To tell stale from active, we use
+    per-record timestamps from the diagnostics endpoint:
+      - If a configured ID is found live AND a *newer* instance of the same
+        device type exists, the configured ID is remapped to the fresher one.
+      - If diagnostics is unavailable, falls back to positional matching.
     """
     remap: dict[str, dict[int, int]] = {}
 
     if not system_overview_data or "devices" not in system_overview_data:
-        # No live data available — every ID maps to itself
         for category, ids in configured.items():
             remap[category] = {cid: cid for cid in ids}
         return remap
 
-    # Collect live instance IDs per category
+    # Collect live instance IDs per category from system-overview
     live_by_category: dict[str, list[int]] = {}
     for device in system_overview_data["devices"]:
         dev_type = device.get("idDeviceType")
@@ -165,15 +200,39 @@ def _build_instance_remap(
     for cat in live_by_category:
         live_by_category[cat] = sorted(live_by_category[cat])
 
-    # Match configured → live per category by sorted position
+    # Build per-instance freshness from diagnostics
+    freshness = _build_freshness_map(diagnostics_data)
+
     for category, configured_ids in configured.items():
         cat_remap: dict[int, int] = {}
         live_ids = live_by_category.get(category, [])
         sorted_conf = sorted(configured_ids)
+        cat_freshness = freshness.get(category, {})
 
         for i, cid in enumerate(sorted_conf):
             if cid in live_ids:
-                cat_remap[cid] = cid
+                # Configured ID exists in live list — but it might be stale.
+                # Check if a *new* instance (not configured) has fresher data.
+                if cat_freshness:
+                    cid_ts = cat_freshness.get(cid, 0)
+                    new_candidates = [
+                        (lid, cat_freshness.get(lid, 0))
+                        for lid in live_ids
+                        if lid not in sorted_conf and cat_freshness.get(lid, 0) > cid_ts
+                    ]
+                    if new_candidates:
+                        best_lid, best_ts = max(new_candidates, key=lambda x: x[1])
+                        cat_remap[cid] = best_lid
+                        _LOGGER.warning(
+                            "VRM instance remap for %s: configured %d (ts %d) → "
+                            "live %d (ts %d, fresher by %ds).",
+                            category, cid, cid_ts, best_lid, best_ts, best_ts - cid_ts,
+                        )
+                    else:
+                        cat_remap[cid] = cid
+                else:
+                    # No diagnostics — trust system-overview as-is
+                    cat_remap[cid] = cid
             elif i < len(live_ids):
                 cat_remap[cid] = live_ids[i]
                 _LOGGER.warning(
@@ -182,7 +241,6 @@ def _build_instance_remap(
                     category, cid, live_ids[i],
                 )
             else:
-                # No live replacement — use configured (will likely return empty data)
                 cat_remap[cid] = cid
 
         remap[category] = cat_remap
@@ -267,14 +325,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Temporary list of all dynamic coordinators for initial refresh
     dynamic_coordinators = []
 
-    # --- Fetch system-overview FIRST to detect instance ID changes ---
+    # --- Fetch system-overview AND diagnostics FIRST to detect instance ID changes ---
+    # Diagnostics provides per-record timestamps that let us distinguish stale
+    # from active devices when VRM reassigns an instance ID.
     try:
         await system_overview_coord.async_refresh()
     except Exception as err:
         _LOGGER.warning("Could not fetch system overview for instance detection: %s", err)
 
+    try:
+        await diagnostics_coord.async_refresh()
+    except Exception as err:
+        _LOGGER.warning("Could not fetch diagnostics for instance detection: %s", err)
+
     instance_remap = _build_instance_remap(
         system_overview_coord.data,
+        diagnostics_coord.data,
         {
             "battery": battery_instance_ids,
             "multi": multi_instance_ids,
