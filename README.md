@@ -10,7 +10,8 @@ Victron VRM API Integration for Home Assistant
 This integration uses the [Victron VRM Portal](https://vrm.victronenergy.com/) to get data from the API. All you need for setup are some numbers from your VRM Portal.
 It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You also get Overall Stats for the Day, Week, Month, and Year, plus System Overview information and Diagnostics for all detected devices.
 
-> 📖 **[Full Documentation](documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
+> 📖 **[Full Documentation](docs/documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
+> 📋 **[Inventory](INVENTORY.md)** — Complete file inventory, sensor catalog, and API endpoint map.
 
 <details>
    <summary> <b>VRM API supported Devices and Sensors</b></summary> 
@@ -217,6 +218,7 @@ It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You
 
 | Version | Changes |
 | :--- | :--- |
+| **v1.6.0** | Auto-remap instance IDs when VRM reassigns them; fix stale enum values (Charge State, VE.Bus State) |
 | **v1.5.9** | Fix aiohttp session/timeout compatibility with HA 2026.2.x |
 | **v1.5.8** | Fix diagnostics endpoint + decimal precision display |
 | **v1.5.6** | Smart sensor creation — only create sensors when data is available |
@@ -225,7 +227,7 @@ It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You
 | **v1.5.3** | Add Starter Battery Voltage, System Overview device |
 | **v1.5.2** | HACS default repository registration |
 
-See [documentation.md](documentation.md) for the full changelog with details.
+See [docs/documentation.md](docs/documentation.md) for the full changelog with details.
 
 ## 🔧 Troubleshooting
 
@@ -238,9 +240,10 @@ If sensors show as **Unavailable**:
      logs:
        custom_components.victron_vrm_api: debug
    ```
-4. See the [Full Documentation](documentation.md#troubleshooting) for more solutions.
+4. See the [Full Documentation](docs/documentation.md#troubleshooting) for more solutions.
 
 ## 📖 Documentation
 
-- **[Full Documentation](documentation.md)** — Complete reference including API details, architecture, development guide
-- **[Developer Instructions](Instructions.md)** — Code architecture and contribution guide
+- **[Full Documentation](docs/documentation.md)** — Complete reference including API details, architecture, development guide
+- **[Developer Instructions](docs/Instructions.md)** — Code architecture and contribution guide
+- **[Inventory](INVENTORY.md)** — File inventory, sensor catalog, API endpoints

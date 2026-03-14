@@ -123,6 +123,73 @@ def _parse_instance_ids(config_string: str) -> list[int]:
     return sorted(list(ids))
 
 
+# VRM device type IDs → internal category names
+_VRM_DEVICE_TYPE_MAP = {
+    1: "multi",          # VE.Bus System (MultiPlus / Quattro)
+    2: "battery",        # Battery Monitor (BMV / SmartShunt)
+    3: "pv_inverter",    # PV Inverter (Fronius, SMA, …)
+    4: "solar_charger",  # Solar Charger (BlueSolar / SmartSolar MPPT)
+    12: "tank",          # Tank sensor
+}
+
+
+def _build_instance_remap(
+    system_overview_data: dict | None,
+    configured: dict[str, list[int]],
+) -> dict[str, dict[int, int]]:
+    """Map configured instance IDs to live ones using system-overview.
+
+    Returns a nested dict {category: {configured_id: live_id}}.
+    If a configured ID is still present in the live data it maps to itself.
+    If it disappeared but a new instance of the same device type appeared,
+    the configured ID is remapped by sorted position within that type.
+    """
+    remap: dict[str, dict[int, int]] = {}
+
+    if not system_overview_data or "devices" not in system_overview_data:
+        # No live data available — every ID maps to itself
+        for category, ids in configured.items():
+            remap[category] = {cid: cid for cid in ids}
+        return remap
+
+    # Collect live instance IDs per category
+    live_by_category: dict[str, list[int]] = {}
+    for device in system_overview_data["devices"]:
+        dev_type = device.get("idDeviceType")
+        dev_instance = device.get("instance")
+        if dev_type is not None and dev_instance is not None:
+            category = _VRM_DEVICE_TYPE_MAP.get(dev_type)
+            if category:
+                live_by_category.setdefault(category, []).append(dev_instance)
+
+    for cat in live_by_category:
+        live_by_category[cat] = sorted(live_by_category[cat])
+
+    # Match configured → live per category by sorted position
+    for category, configured_ids in configured.items():
+        cat_remap: dict[int, int] = {}
+        live_ids = live_by_category.get(category, [])
+        sorted_conf = sorted(configured_ids)
+
+        for i, cid in enumerate(sorted_conf):
+            if cid in live_ids:
+                cat_remap[cid] = cid
+            elif i < len(live_ids):
+                cat_remap[cid] = live_ids[i]
+                _LOGGER.warning(
+                    "VRM instance ID changed for %s: configured %d → live %d. "
+                    "Entities keep their original IDs; API calls use the new instance.",
+                    category, cid, live_ids[i],
+                )
+            else:
+                # No live replacement — use configured (will likely return empty data)
+                cat_remap[cid] = cid
+
+        remap[category] = cat_remap
+
+    return remap
+
+
 # --- 3. Setup-Funktion -----------------------------------------------------------
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up VRM sensors from a config entry."""
@@ -200,12 +267,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Temporary list of all dynamic coordinators for initial refresh
     dynamic_coordinators = []
 
+    # --- Fetch system-overview FIRST to detect instance ID changes ---
+    try:
+        await system_overview_coord.async_refresh()
+    except Exception as err:
+        _LOGGER.warning("Could not fetch system overview for instance detection: %s", err)
+
+    instance_remap = _build_instance_remap(
+        system_overview_coord.data,
+        {
+            "battery": battery_instance_ids,
+            "multi": multi_instance_ids,
+            "pv_inverter": pv_inverter_instance_ids,
+            "tank": tank_instance_ids,
+            "solar_charger": solar_charger_instance_ids,
+        },
+    )
+
     # --- Initialize dynamic coordinators and device info per instance ---
     
     # 1. Batteries (extended with History and Alarms coordinator)
     for instance_id in battery_instance_ids:
+        live_id = instance_remap.get("battery", {}).get(instance_id, instance_id)
         # Standard Battery Summary
-        battery_endpoint = f"widgets/BatterySummary?instance={instance_id}"
+        battery_endpoint = f"widgets/BatterySummary?instance={live_id}"
         coord_name = f"VRM Battery {instance_id} Summary"
         battery_summary_coord = VrmDataCoordinator(
             hass, site_id, token, battery_endpoint, coord_name, DEFAULT_SCAN_INTERVAL_BATTERY
@@ -213,7 +298,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(battery_summary_coord)
 
         # History Data (for Charge Cycles)
-        history_endpoint = f"widgets/HistoricData?instance={instance_id}"
+        history_endpoint = f"widgets/HistoricData?instance={live_id}"
         history_coord_name = f"VRM Battery {instance_id} History"
         battery_history_coord = VrmDataCoordinator(
             hass, site_id, token, history_endpoint, history_coord_name, DEFAULT_SCAN_INTERVAL_BATTERY
@@ -221,7 +306,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(battery_history_coord)
         
         # Alarms Data
-        alarm_endpoint = f"widgets/BatteryMonitorWarningsAndAlarms?instance={instance_id}"
+        alarm_endpoint = f"widgets/BatteryMonitorWarningsAndAlarms?instance={live_id}"
         alarm_coord_name = f"VRM Battery {instance_id} Alarms"
         battery_alarm_coord = VrmDataCoordinator(
             hass, site_id, token, alarm_endpoint, alarm_coord_name, DEFAULT_SCAN_INTERVAL_BATTERY
@@ -232,6 +317,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             'coordinator': battery_summary_coord,
             'history_coordinator': battery_history_coord, 
             'alarm_coordinator': battery_alarm_coord,
+            'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_battery_{instance_id}")},
                 "name": f"Battery {instance_id}",
@@ -243,7 +329,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # 2. MultiPlus
     for instance_id in multi_instance_ids:
-        multi_status_endpoint = f"widgets/Status?instance={instance_id}"
+        live_id = instance_remap.get("multi", {}).get(instance_id, instance_id)
+        multi_status_endpoint = f"widgets/Status?instance={live_id}"
         coord_name = f"VRM MultiPlus {instance_id} Status"
         multi_status_coord = VrmDataCoordinator(
             hass, site_id, token, multi_status_endpoint, coord_name, DEFAULT_SCAN_INTERVAL_MULTI
@@ -251,6 +338,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(multi_status_coord)
         device_data["multi"][instance_id] = {
             'coordinator': multi_status_coord,
+            'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_multiplus_{instance_id}")},
                 "name": f"MultiPlus {instance_id}",
@@ -262,7 +350,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         
     # 3. PV Inverter
     for instance_id in pv_inverter_instance_ids:
-        pv_inverter_endpoint = f"widgets/PVInverterStatus?instance={instance_id}"
+        live_id = instance_remap.get("pv_inverter", {}).get(instance_id, instance_id)
+        pv_inverter_endpoint = f"widgets/PVInverterStatus?instance={live_id}"
         coord_name = f"VRM PV Inverter {instance_id} Status"
         pv_inverter_coord = VrmDataCoordinator(
             hass, site_id, token, pv_inverter_endpoint, coord_name, DEFAULT_SCAN_INTERVAL_PV_INVERTER
@@ -270,6 +359,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(pv_inverter_coord)
         device_data["pv_inverter"][instance_id] = {
             'coordinator': pv_inverter_coord,
+            'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_pvinverter_{instance_id}")},
                 "name": f"PV Inverter {instance_id}",
@@ -281,7 +371,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # 4. Tank
     for instance_id in tank_instance_ids:
-        tank_endpoint = f"widgets/TankSummary?instance={instance_id}"
+        live_id = instance_remap.get("tank", {}).get(instance_id, instance_id)
+        tank_endpoint = f"widgets/TankSummary?instance={live_id}"
         coord_name = f"VRM Tank {instance_id} Summary"
         tank_coord = VrmDataCoordinator(
             hass, site_id, token, tank_endpoint, coord_name, DEFAULT_SCAN_INTERVAL_TANK
@@ -289,6 +380,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(tank_coord)
         device_data["tank"][instance_id] = {
             'coordinator': tank_coord,
+            'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_tank_{instance_id}")},
                 "name": f"Tank {instance_id}",
@@ -300,7 +392,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # 5. Solar Charger
     for instance_id in solar_charger_instance_ids:
-        solar_charger_endpoint = f"widgets/SolarChargerSummary?instance={instance_id}"
+        live_id = instance_remap.get("solar_charger", {}).get(instance_id, instance_id)
+        solar_charger_endpoint = f"widgets/SolarChargerSummary?instance={live_id}"
         coord_name = f"VRM Solar Charger {instance_id} Summary"
         solar_charger_coord = VrmDataCoordinator(
             hass, site_id, token, solar_charger_endpoint, coord_name, DEFAULT_SCAN_INTERVAL_SOLAR_CHARGER
@@ -308,6 +401,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         dynamic_coordinators.append(solar_charger_coord)
         device_data["solar_charger"][instance_id] = {
             'coordinator': solar_charger_coord,
+            'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_solarcharger_{instance_id}")},
                 "name": f"Solar Charger {instance_id}",
@@ -317,9 +411,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             }
         }
     
-    # Execute initial refresh (including diagnostics_coord)
-    all_coordinators = [overall_stats_coord, stats_coord, system_overview_coord, diagnostics_coord] + dynamic_coordinators
-    for coordinator in all_coordinators:
+    # Execute initial refresh (system_overview_coord already fetched above)
+    remaining_coordinators = [overall_stats_coord, stats_coord, diagnostics_coord] + dynamic_coordinators
+    for coordinator in remaining_coordinators:
         try:
             await coordinator.async_config_entry_first_refresh()
         except Exception as err:
@@ -755,16 +849,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Add battery diagnostics
         for instance_id, data in device_data["battery"].items():
             dev_info = data['device_info']
+            live_id = data.get('live_instance', instance_id)
             for data_id, (name, device_class, unit, icon) in battery_diagnostics_config.items():
-                # Find matching record in diagnostics
+                # Find matching record in diagnostics (use live instance)
                 for record in diagnostics_records:
                     if (str(record.get("idDataAttribute")) == data_id and 
-                        record.get("instance") == instance_id):
+                        record.get("instance") == live_id):
                         entities.append(
                             VrmDiagnosticSensor(
                                 diagnostics_coord, site_id,
                                 f"diag_{data_id}_{instance_id}",
-                                data_id, instance_id, name,
+                                data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
                                 unit, icon, dev_info
                             )
@@ -774,16 +869,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Add solar charger diagnostics
         for instance_id, data in device_data["solar_charger"].items():
             dev_info = data['device_info']
+            live_id = data.get('live_instance', instance_id)
             for data_id, (name, device_class, unit, icon) in solar_diagnostics_config.items():
-                # Find matching record in diagnostics
+                # Find matching record in diagnostics (use live instance)
                 for record in diagnostics_records:
                     if (str(record.get("idDataAttribute")) == data_id and 
-                        record.get("instance") == instance_id):
+                        record.get("instance") == live_id):
                         entities.append(
                             VrmDiagnosticSensor(
                                 diagnostics_coord, site_id,
                                 f"diag_{data_id}_{instance_id}",
-                                data_id, instance_id, name,
+                                data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
                                 unit, icon, dev_info
                             )
@@ -793,16 +889,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Add MultiPlus diagnostics
         for instance_id, data in device_data["multi"].items():
             dev_info = data['device_info']
+            live_id = data.get('live_instance', instance_id)
             for data_id, (name, device_class, unit, icon) in multi_diagnostics_config.items():
-                # Find matching record in diagnostics
+                # Find matching record in diagnostics (use live instance)
                 for record in diagnostics_records:
                     if (str(record.get("idDataAttribute")) == data_id and 
-                        record.get("instance") == instance_id):
+                        record.get("instance") == live_id):
                         entities.append(
                             VrmDiagnosticSensor(
                                 diagnostics_coord, site_id,
                                 f"diag_{data_id}_{instance_id}",
-                                data_id, instance_id, name,
+                                data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
                                 unit, icon, dev_info
                             )
@@ -1027,12 +1124,22 @@ class VrmMultiStatusSensor(VrmBaseSensor):
         data_item = data.get(self._data_id, {})
         if not data_item:
             return None
+
+        # Enum attributes: resolve valueEnum through the enum map
+        # (nameEnum / formattedValue can be stale on the VRM server)
+        enum_values = data_item.get("dataAttributeEnumValues")
+        value_enum = data_item.get("valueEnum")
+        if enum_values and value_enum is not None:
+            for entry in enum_values:
+                if entry.get("valueEnum") == value_enum:
+                    return entry["nameEnum"]
+
         value_float = data_item.get("valueFloat")
         if value_float is not None:
             return value_float
-        value_enum = data_item.get("nameEnum")
-        if value_enum is not None:
-            return value_enum
+        value_enum_name = data_item.get("nameEnum")
+        if value_enum_name is not None:
+            return value_enum_name
         return data_item.get("value")
 
 # --- 9. PV Inverter Sensor --------------------
@@ -1050,7 +1157,15 @@ class VrmPvInverterSensor(VrmBaseSensor):
         attr = data.get(self._data_id, {})
         if not attr:
             return None
-            
+
+        # Enum attributes: resolve valueEnum through the enum map
+        enum_values = attr.get("dataAttributeEnumValues")
+        value_enum_id = attr.get("valueEnum")
+        if enum_values and value_enum_id is not None:
+            for entry in enum_values:
+                if entry.get("valueEnum") == value_enum_id:
+                    return entry["nameEnum"]
+
         value_float = attr.get("valueFloat")
         if value_float is not None:
             return value_float
@@ -1075,7 +1190,15 @@ class VrmTankSensor(VrmBaseSensor):
         attr = data.get(str(self._data_id), {}) 
         if not attr:
             return None
-            
+
+        # Enum attributes: resolve valueEnum through the enum map
+        enum_values = attr.get("dataAttributeEnumValues")
+        value_enum_id = attr.get("valueEnum")
+        if enum_values and value_enum_id is not None:
+            for entry in enum_values:
+                if entry.get("valueEnum") == value_enum_id:
+                    return entry["nameEnum"]
+
         value_float = attr.get("valueFloat")
         if value_float is not None:
             return value_float
@@ -1100,7 +1223,15 @@ class VrmSolarChargerSensor(VrmBaseSensor):
         attr = data.get(str(self._data_id), {}) 
         if not attr:
             return None
-            
+
+        # Enum attributes: resolve valueEnum through the enum map
+        enum_values = attr.get("dataAttributeEnumValues")
+        value_enum_id = attr.get("valueEnum")
+        if enum_values and value_enum_id is not None:
+            for entry in enum_values:
+                if entry.get("valueEnum") == value_enum_id:
+                    return entry["nameEnum"]
+
         value_float = attr.get("valueFloat")
         if value_float is not None:
             return value_float
@@ -1182,17 +1313,26 @@ class VrmDiagnosticSensor(VrmBaseSensor):
             if (str(record.get("idDataAttribute")) == self._data_id and 
                 record.get("instance") == self._instance):
                 
-                # Try formattedValue first (includes unit)
+                raw = record.get("rawValue")
+
+                # Enum attributes: resolve rawValue through the enum map
+                # (formattedValue can be stale on the VRM server)
+                enum_values = record.get("dataAttributeEnumValues")
+                if enum_values and raw is not None:
+                    for entry in enum_values:
+                        if entry.get("valueEnum") == raw:
+                            return entry["nameEnum"]
+                    return raw
+
+                # Numeric: try formattedValue first (includes unit)
                 formatted = record.get("formattedValue")
                 if formatted:
-                    # Strip unit suffix if present
                     try:
                         return float(formatted.split()[0])
                     except (ValueError, IndexError):
                         return formatted
                 
                 # Fallback to rawValue
-                raw = record.get("rawValue")
                 if raw is not None:
                     return raw
                 

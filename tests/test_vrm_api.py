@@ -1,10 +1,17 @@
-"""Test script for VRM API - Local testing only (not in git)."""
+"""Test script for VRM API - Local testing only.
+
+Copy .env.example to .env and fill in your credentials before running.
+"""
+import os
 import requests
 import json
+from dotenv import load_dotenv
 
-# CONFIGURATION - Update these values for your installation
-TOKEN = "YOUR_TOKEN_HERE"
-SITE_ID = "YOUR_SITE_ID_HERE"
+load_dotenv()
+
+# CONFIGURATION — loaded from .env
+TOKEN = os.environ["VRM_TOKEN"]
+SITE_ID = os.environ["VRM_SITE_ID"]
 
 # Optionally specify instance IDs to test
 MULTI_INSTANCE = "257"
