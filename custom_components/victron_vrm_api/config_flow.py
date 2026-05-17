@@ -4,6 +4,7 @@ from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 import logging
 
 from .const import (
@@ -22,7 +23,9 @@ _LOGGER = logging.getLogger(__name__)
 # Definieren des Schemas für die initiale Konfiguration mit Beschreibungen
 DATA_SCHEMA = vol.Schema({
     vol.Required(CONF_SITE_ID, description="Victron VRM Site ID"): str,
-    vol.Required(CONF_TOKEN, description="VRM API Token"): str,
+    vol.Required(CONF_TOKEN, description="VRM API Token"): selector.TextSelector(
+        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+    ),
     vol.Optional(CONF_BATTERY_INSTANCE, default="", description="Battery Instance IDs (e.g., '1, 2')"): str,
     vol.Optional(CONF_MULTI_INSTANCE, default="", description="MultiPlus Instance IDs (e.g., '100, 101')"): str,
     vol.Optional(CONF_PV_INVERTER_INSTANCE, default="", description="PV Inverter Instance IDs (e.g., '200')"): str,
@@ -65,10 +68,14 @@ class VictronVrmConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         
         if user_input is not None:
+            updated_data = {**entry.data, **user_input}
+            if not user_input.get(CONF_TOKEN):
+                updated_data[CONF_TOKEN] = entry.data[CONF_TOKEN]
+
             # Aktualisiere den Eintrag und lade ihn neu
             return self.async_update_reload_and_abort(
                 entry, 
-                data=user_input
+                data=updated_data
             )
 
         # Schema mit aktuellen Werten als Default vorbefüllen UND Beschreibungen beibehalten
@@ -76,7 +83,9 @@ class VictronVrmConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         reconfigure_schema = vol.Schema({
             vol.Required(CONF_SITE_ID, default=current_config.get(CONF_SITE_ID), description="Victron VRM Site ID"): str,
-            vol.Required(CONF_TOKEN, default=current_config.get(CONF_TOKEN), description="VRM API Token"): str,
+            vol.Optional(CONF_TOKEN, default="", description="VRM API Token (leave empty to keep current token)"): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
             vol.Optional(CONF_BATTERY_INSTANCE, default=current_config.get(CONF_BATTERY_INSTANCE, ""), description="Battery Instance IDs (e.g., '1, 2')"): str,
             vol.Optional(CONF_MULTI_INSTANCE, default=current_config.get(CONF_MULTI_INSTANCE, ""), description="MultiPlus Instance IDs (e.g., '100, 101')"): str,
             vol.Optional(CONF_PV_INVERTER_INSTANCE, default=current_config.get(CONF_PV_INVERTER_INSTANCE, ""), description="PV Inverter Instance IDs (e.g., '200')"): str,

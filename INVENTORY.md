@@ -1,6 +1,6 @@
 # Inventory — Victron VRM API for Home Assistant
 
-> Last updated: 2026-03-14 | Version: **1.5.9**
+> Last updated: 2026-05-17 | Version: **1.6.1**
 
 ## What Ships to Users
 
@@ -31,11 +31,14 @@ Only `custom_components/victron_vrm_api/` is distributed (via HACS or manual cop
 │       └── de.json
 ├── docs/                                ← documentation & screenshots
 │   ├── documentation.md                 Full API reference & changelog
+│   ├── architecture.md                  Runtime architecture and Mermaid diagram
+│   ├── security.md                      Boundaries, pitfalls, and risk register
 │   ├── Instructions.md                  Developer architecture guide
 │   ├── DEPLOY_LOCAL.md                  Local deployment checklist
 │   ├── sensor_v1.4_backup.py            Pre-diagnostics sensor.py backup
 │   └── *.png                            Screenshots for README
 ├── scripts/                             ← developer utilities (not shipped)
+│   ├── README.md                        Script boundary and safety rules
 │   └── deploy_to_ha.ps1                 SCP / file-share deploy helper
 ├── tests/                               ← API test scripts (not shipped)
 │   ├── test_vrm_api.py                  Basic API connectivity test
@@ -50,6 +53,7 @@ Only `custom_components/victron_vrm_api/` is distributed (via HACS or manual cop
 ├── .env.example                         ← credential template
 ├── .github/
 │   ├── copilot-instructions.md          Copilot coding rules
+│   ├── skills/                          Workspace maintenance skills
 │   └── workflows/validate.yml           HACS validation CI
 ├── hacs.json                            HACS metadata
 ├── LICENSE                              Licence file
@@ -64,7 +68,7 @@ Only `custom_components/victron_vrm_api/` is distributed (via HACS or manual cop
 | Battery | 35 | `widgets/BatterySummary`, `HistoricData`, alarms | 20 s |
 | MultiPlus | 29 | `widgets/Status` | 20 s |
 | PV Inverter | 16 | `widgets/PVInverterStatus` | 20 s |
-| Tank | 6 | `widgets/TankSummary` | 60 s |
+| Tank | 6 | `widgets/TankSummary`, diagnostics fallback | 60 s |
 | Solar Charger | 11 | `widgets/SolarChargerSummary`, diagnostics | 20 s |
 | Overall Stats | 16 | `overallstats`, `stats` (kWh) | 300 s |
 | System Overview | 10/dev | `system-overview` | 1200 s |
@@ -82,6 +86,7 @@ Base: `https://vrmapi.victronenergy.com/v2/installations/{site_id}/`
 | `widgets/SolarChargerSummary?instance={id}` | PV voltage, yield, charger state |
 | `widgets/PVInverterStatus?instance={id}` | PV inverter per-phase data |
 | `widgets/TankSummary?instance={id}` | Tank level, capacity, type |
+| `diagnostics` tank records | Tank discovery and fallback values when tanks are absent from system-overview/widgets |
 | `overallstats` | Total solar, consumption, grid in/out |
 | `stats?type=kwh&start=…&end=…` | kWh statistics for Battery↔Grid/Consumer, PV |
 | `system-overview` | Firmware, serial, product name per device |
@@ -95,3 +100,12 @@ Base: `https://vrmapi.victronenergy.com/v2/installations/{site_id}/`
 | Site ID | `.env` (local) | `.gitignore` |
 | User token in HA | `config_entries` (encrypted) | HA core |
 | Template | `.env.example` (committed) | placeholders only |
+
+## Boundary & Tracking Docs
+
+| File | Purpose |
+| :--- | :--- |
+| [docs/architecture.md](docs/architecture.md) | Runtime flow, component responsibilities, API data flow, Mermaid diagram |
+| [docs/security.md](docs/security.md) | Secret rules, pitfalls learned, review checklist, vulnerability/risk register |
+| [scripts/README.md](scripts/README.md) | Explains why local deployment helpers are not shipped and usually ignored |
+| [.github/skills/victron-vrm-maintenance/SKILL.md](.github/skills/victron-vrm-maintenance/SKILL.md) | Repeatable maintenance workflow for agents and future repo work |

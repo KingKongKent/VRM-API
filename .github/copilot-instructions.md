@@ -2,7 +2,7 @@
 
 ## Project
 Home Assistant custom integration that polls the Victron VRM Portal API.
-Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.6.0
+Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.6.1
 
 ## Repository Layout
 ```
@@ -16,6 +16,7 @@ custom_components/victron_vrm_api/   ← Integration source (shipped to users)
 docs/                    screenshots, documentation, deployment notes
 scripts/                 local deployment helpers (not shipped)
 tests/                   API test/exploration scripts (not shipped)
+.github/skills/          workspace skills for repeatable maintenance workflows
 ```
 
 ## Key Rules
@@ -28,6 +29,18 @@ tests/                   API test/exploration scripts (not shipped)
 7. Smart sensor creation: only create a sensor entity if the VRM API actually returns data for it.
 8. **Enum resolution**: Always resolve enum values via `dataAttributeEnumValues` + `rawValue` first — VRM's `formattedValue` can be stale server-side.
 9. **Instance auto-remap**: On startup, system-overview + diagnostics are fetched to detect if VRM reassigned a device instance ID. Stale instances are detected by comparing per-record timestamps from diagnostics (`dbusServiceType` → category). Entity unique IDs stay pinned to the configured instance; only API URLs change.
+10. **Tank discovery**: Tanks may be absent from `system-overview` even when VRM collects them in `diagnostics`. Discover tank instances from diagnostics (`dbusServiceType == "tank"`) and use diagnostics as fallback when `widgets/TankSummary` has no attribute.
+11. **Token safety**: Do not prefill saved tokens into reconfigure forms, logs, docs, screenshots, terminal output, or examples. Use password selectors for token input and placeholders in docs.
+12. **Boundary discipline**: Keep local HA targets, operator scripts, captured API payloads, and `.env` files out of tracked shipped code. Commit generic docs only.
+13. **Security tracking**: When a vulnerability or repeated mistake is found, patch it, then record it in `docs/security.md` and update these instructions if the lesson should persist.
+
+## Pitfalls To Avoid
+- Do not trust VRM `formattedValue` for enum/status sensors; it can be stale.
+- Do not assume `system-overview` contains only active instances; stale instances can remain listed.
+- Do not create entities for absent VRM attributes; this causes noisy unknown/unavailable sensors.
+- Do not lower scan intervals without considering HTTP 429 rate limiting.
+- Do not commit real-looking token examples. Use `{your_vrm_token}` or `vrm_token_placeholder`.
+- Do not treat ignored local deploy scripts as release assets.
 
 ## API Reference
 - Base URL: `https://vrmapi.victronenergy.com/v2/installations/{site_id}/`
@@ -39,3 +52,5 @@ tests/                   API test/exploration scripts (not shipped)
 - No YAML configuration — UI config flow only
 - Version bump in `manifest.json`
 - Changelog in `docs/documentation.md`
+- Architecture in `docs/architecture.md`
+- Security risks and pitfalls in `docs/security.md`

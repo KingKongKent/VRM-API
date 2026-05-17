@@ -1,6 +1,6 @@
 # Victron VRM API — Full Documentation
 
-> **Version**: 1.6.0 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
+> **Version**: 1.6.1 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
 
 A Home Assistant custom integration that pulls real-time data from the [Victron VRM Portal](https://vrm.victronenergy.com/) API. Supports Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, and Diagnostics devices — creating **134+ sensors** from a single configuration.
 
@@ -13,6 +13,7 @@ A Home Assistant custom integration that pulls real-time data from the [Victron 
 - [Configuration](#configuration)
 - [Supported Devices & Sensors](#supported-devices--sensors)
 - [Architecture](#architecture)
+- [Security, Boundaries, and Pitfalls](#security-boundaries-and-pitfalls)
 - [API Reference](#api-reference)
 - [Scan Intervals](#scan-intervals)
 - [Error Handling](#error-handling)
@@ -72,7 +73,7 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 | Field | Required | Example | Description |
 | :--- | :---: | :--- | :--- |
 | **Site ID** | Yes | `337075` | Your VRM Installation ID |
-| **Token** | Yes | `cf2e981f...` | VRM API Bearer token |
+| **Token** | Yes | `vrm_token_placeholder` | VRM API token; never commit a real value |
 | **Battery Instance IDs** | No | `288, 291` | Comma-separated battery instance IDs |
 | **MultiPlus Instance IDs** | No | `291` | Comma-separated MultiPlus instance IDs |
 | **PV Inverter Instance IDs** | No | `200, 201` | Comma-separated PV Inverter instance IDs |
@@ -96,7 +97,7 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 | **Battery** | up to 39 | SOC, voltage, current, power, alarms, diagnostics |
 | **MultiPlus** | up to 35 | AC/DC voltages, currents, power, ESS settings, diagnostics |
 | **PV Inverter** | up to 17 | Per-phase voltage, current, power, energy yields |
-| **Tank** | up to 6 | Level, capacity, remaining, type, status |
+| **Tank** | up to 6 | Level, capacity, remaining, type, status; diagnostics discovery/fallback |
 | **Solar Charger** | up to 16 | PV voltage/current, charge state, yields, diagnostics |
 | **Overall Stats** | 16 | Solar yield, consumption, grid in/out for day/week/month/year |
 | **System Overview** | 10 per device | Firmware, serial, connection info for all detected devices |
@@ -217,6 +218,8 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 
 ### Tank Sensors
 
+Tank instances are normally queried through `widgets/TankSummary`. If VRM omits a tank from `system-overview` but still reports it in `diagnostics` (for example a Fresh water tank), the integration discovers that tank from diagnostics and creates fallback sensors from the diagnostic records that are available.
+
 | Sensor Name | VRM ID | Unit | Description |
 | :--- | :---: | :---: | :--- |
 | Capacity | `328` | m³ | Tank capacity |
@@ -285,6 +288,8 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 ---
 
 ## Architecture
+
+The living architecture document and Mermaid diagram are maintained in [architecture.md](architecture.md). Update it whenever endpoints, coordinators, config keys, shipped boundaries, or device flows change.
 
 ### Repository Structure
 
@@ -375,6 +380,20 @@ All requests include the header:
 X-Authorization: Token {your_vrm_token}
 ```
 
+---
+
+## Security, Boundaries, and Pitfalls
+
+Security rules, repeated mistakes, and the risk register are maintained in [security.md](security.md). In short:
+
+- Never commit real VRM tokens, `.env`, SSH keys, Home Assistant tokens, local deployment targets, or private API captures.
+- Use placeholders in docs and examples.
+- Keep local deploy helpers ignored unless they are converted to generic placeholder-only scripts.
+- Patch vulnerabilities in shipped code first, then record the lesson in [security.md](security.md).
+- Before release, scan staged changes for secret-shaped strings.
+
+---
+
 ### Endpoints Used
 
 | Endpoint | Method | Response Key | Description |
@@ -389,6 +408,7 @@ X-Authorization: Token {your_vrm_token}
 | `widgets/Status?instance={id}` | GET | `records` | MultiPlus status |
 | `widgets/PVInverterStatus?instance={id}` | GET | `records` | PV Inverter status |
 | `widgets/TankSummary?instance={id}` | GET | `records` | Tank summary |
+| `diagnostics` tank records | GET | `records` | Tank discovery and fallback values when tanks are absent from system-overview/widgets |
 | `widgets/SolarChargerSummary?instance={id}` | GET | `records` | Solar charger summary |
 
 ### Response Handling
@@ -557,14 +577,14 @@ See [DEPLOY_LOCAL.md](DEPLOY_LOCAL.md) for full details.
 **Quick methods:**
 
 ```powershell
-# Option 1: Use the deployment script
-.\deploy_to_ha.ps1
+# Option 1: Use a local ignored deployment script
+.\scripts\deploy_to_ha.ps1
 
 # Option 2: SCP
 scp -r custom_components/victron_vrm_api root@<HA_IP>:/config/custom_components/
 
-# Option 3: Python SFTP (if SSH requires password and sshpass is unavailable)
-# See deploy scripts in the repo
+# Option 3: Manual copy through a trusted local channel
+# Keep local hostnames, usernames, and tokens out of tracked files
 ```
 
 After deploying:
@@ -584,6 +604,11 @@ After deploying:
 ---
 
 ## Changelog
+
+### v1.6.1 — Tank diagnostics discovery
+- **Feature**: Discover tank instances from diagnostics when VRM collects them but omits them from `system-overview`.
+- **Feature**: Use diagnostics as a fallback for tank attributes when `widgets/TankSummary` does not return a value.
+- **Improvement**: Tank device names can use diagnostic type/custom-name values such as "Fresh water" while unique IDs remain pinned to the configured or discovered instance.
 
 ### v1.6.0 — Instance auto-remap + enum resolution fix
 - **Feature**: Automatic instance ID remap — when VRM reassigns a device instance (e.g., VE.Bus 291 → 290 after Cerbo restart), the integration detects this at startup using diagnostics timestamps and automatically queries the correct live instance. Dashboard entities stay stable under their original IDs.

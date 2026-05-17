@@ -10,14 +10,17 @@ Victron VRM API Integration for Home Assistant
 This integration uses the [Victron VRM Portal](https://vrm.victronenergy.com/) to get data from the API. All you need for setup are some numbers from your VRM Portal.
 It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You also get Overall Stats for the Day, Week, Month, and Year, plus System Overview information and Diagnostics for all detected devices.
 
-### Key Features (v1.6.0)
+### Key Features (v1.6.1)
 - **134+ sensors** — Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, Diagnostics
 - **Instance auto-remap** — If VRM reassigns a device instance ID (e.g., after Cerbo restart), the integration detects this automatically and queries the correct live instance. Your dashboards stay stable.
 - **Reliable enum values** — Charge State, VE.Bus State, and similar status sensors always show the correct value, even when VRM's server-side cache is stale.
+- **Tank diagnostics discovery** — Fresh water and other tank sensors can be discovered from diagnostics when VRM does not list them in System Overview.
 - **Smart sensor creation** — Only creates sensor entities when the VRM API actually returns data for them.
 
 > 📖 **[Full Documentation](docs/documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
 > 📋 **[Inventory](INVENTORY.md)** — Complete file inventory, sensor catalog, and API endpoint map.
+> 🧭 **[Architecture](docs/architecture.md)** — Runtime flow, boundaries, and Mermaid diagram.
+> 🔒 **[Security & Pitfalls](docs/security.md)** — Secret handling, repeated mistakes, and risk register.
 
 <details>
    <summary> <b>VRM API supported Devices and Sensors</b></summary> 
@@ -224,6 +227,7 @@ It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You
 
 | Version | Changes |
 | :--- | :--- |
+| **v1.6.1** | Discover tank instances from diagnostics and use diagnostics fallback for Fresh water tank values |
 | **v1.6.0** | Auto-remap instance IDs when VRM reassigns them; fix stale enum values (Charge State, VE.Bus State) |
 | **v1.5.9** | Fix aiohttp session/timeout compatibility with HA 2026.2.x |
 | **v1.5.8** | Fix diagnostics endpoint + decimal precision display |
@@ -251,5 +255,7 @@ If sensors show as **Unavailable**:
 ## 📖 Documentation
 
 - **[Full Documentation](docs/documentation.md)** — Complete reference including API details, architecture, development guide
+- **[Architecture](docs/architecture.md)** — Runtime flow, shipped-code boundary, and diagram
+- **[Security & Pitfalls](docs/security.md)** — Secret handling, deployment boundaries, and risk register
 - **[Developer Instructions](docs/Instructions.md)** — Code architecture and contribution guide
 - **[Inventory](INVENTORY.md)** — File inventory, sensor catalog, API endpoints

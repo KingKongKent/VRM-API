@@ -141,6 +141,58 @@ _VRM_DBUS_SERVICE_MAP = {
     "tank": "tank",
 }
 
+_TANK_DIAGNOSTIC_DATA_IDS = {"328", "329", "330", "331", "443", "638"}
+
+
+def _resolve_enum_record_value(record: dict[str, Any]) -> Any:
+    """Resolve a diagnostics record enum from rawValue before formattedValue."""
+    raw = record.get("rawValue")
+    enum_values = record.get("dataAttributeEnumValues")
+    if enum_values and raw is not None:
+        for entry in enum_values:
+            if entry.get("valueEnum") == raw:
+                return entry.get("nameEnum")
+        return raw
+    formatted = record.get("formattedValue")
+    if formatted not in (None, ""):
+        return formatted
+    return raw
+
+
+def _build_tank_info_from_diagnostics(diagnostics_data: dict | None) -> dict[int, dict[str, Any]]:
+    """Build tank metadata from diagnostics records when system-overview omits tanks."""
+    tank_info: dict[int, dict[str, Any]] = {}
+    if not diagnostics_data:
+        return tank_info
+
+    for record in diagnostics_data.get("records", []):
+        if record.get("dbusServiceType") != "tank":
+            continue
+        instance = record.get("instance")
+        data_id = str(record.get("idDataAttribute"))
+        if instance is None or data_id not in _TANK_DIAGNOSTIC_DATA_IDS:
+            continue
+
+        info = tank_info.setdefault(instance, {})
+        value = _resolve_enum_record_value(record)
+        if data_id == "329" and value:
+            info["type_name"] = str(value)
+        elif data_id == "638" and value:
+            info["custom_name"] = str(value)
+
+    for instance, info in tank_info.items():
+        info["name"] = info.get("custom_name") or info.get("type_name") or f"Tank {instance}"
+
+    return tank_info
+
+
+def _diagnostic_record_exists(records: list[dict[str, Any]], data_id: str, instance: int) -> bool:
+    """Return True when diagnostics has a record for this attribute and instance."""
+    return any(
+        str(record.get("idDataAttribute")) == data_id and record.get("instance") == instance
+        for record in records
+    )
+
 
 def _build_freshness_map(diagnostics_data: dict | None) -> dict[str, dict[int, int]]:
     """Build {category: {instance_id: max_timestamp}} from diagnostics records."""
@@ -261,7 +313,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     battery_instance_ids = _parse_instance_ids(config_data.get(CONF_BATTERY_INSTANCE, ""))
     multi_instance_ids = _parse_instance_ids(config_data.get(CONF_MULTI_INSTANCE, ""))
     pv_inverter_instance_ids = _parse_instance_ids(config_data.get(CONF_PV_INVERTER_INSTANCE, ""))
-    tank_instance_ids = _parse_instance_ids(config_data.get(CONF_TANK_INSTANCE, ""))
+    configured_tank_instance_ids = _parse_instance_ids(config_data.get(CONF_TANK_INSTANCE, ""))
+    tank_instance_ids = list(configured_tank_instance_ids)
     solar_charger_instance_ids = _parse_instance_ids(config_data.get(CONF_SOLAR_CHARGER_INSTANCE, ""))
     
     
@@ -337,6 +390,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         await diagnostics_coord.async_refresh()
     except Exception as err:
         _LOGGER.warning("Could not fetch diagnostics for instance detection: %s", err)
+
+    diagnostics_tank_info = _build_tank_info_from_diagnostics(diagnostics_coord.data)
+    discovered_tank_ids = sorted(set(diagnostics_tank_info) - set(tank_instance_ids))
+    if discovered_tank_ids:
+        tank_instance_ids = sorted(set(tank_instance_ids).union(discovered_tank_ids))
+        _LOGGER.info(
+            "Discovered VRM tank instance IDs from diagnostics: %s",
+            ", ".join(str(instance_id) for instance_id in discovered_tank_ids),
+        )
 
     instance_remap = _build_instance_remap(
         system_overview_coord.data,
@@ -438,6 +500,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # 4. Tank
     for instance_id in tank_instance_ids:
         live_id = instance_remap.get("tank", {}).get(instance_id, instance_id)
+        tank_info = diagnostics_tank_info.get(instance_id, {})
+        tank_name = tank_info.get("name") or f"Tank {instance_id}"
         tank_endpoint = f"widgets/TankSummary?instance={live_id}"
         coord_name = f"VRM Tank {instance_id} Summary"
         tank_coord = VrmDataCoordinator(
@@ -449,9 +513,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             'live_instance': live_id,
             'device_info': {
                 "identifiers": {(DOMAIN, f"{site_id}_tank_{instance_id}")},
-                "name": f"Tank {instance_id}",
+                "name": tank_name,
+                "_unique_id_name": f"Tank {instance_id}",
                 "manufacturer": "Victron VRM API",
-                "model": f"instance_id {instance_id}",
+                "model": tank_info.get("type_name") or f"instance_id {instance_id}",
                 "via_device": (DOMAIN, site_id),
             }
         }
@@ -752,16 +817,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     for instance_id, data in device_data["tank"].items():
         coord = data['coordinator']
         dev_info = data['device_info']
-        if coord.data and coord.data.get("data"):
-            actual_tank_data = coord.data.get("data", {})
-            for key, (data_id, name, device_class, state_class, unit, icon) in tank_sensors_config.items():
-                if str(data_id) in actual_tank_data:
-                    entities.append(
-                        VrmTankSensor(
-                            coord, site_id, f"{key}_{instance_id}", data_id, name, 
-                            device_class, state_class, unit, icon, dev_info
-                        )
+        live_id = data.get('live_instance', instance_id)
+        tank_name = dev_info.get("name", f"Tank {instance_id}")
+        actual_tank_data = coord.data.get("data", {}) if coord.data else {}
+        diagnostics_records = diagnostics_coord.data.get("records", []) if diagnostics_coord.data else []
+
+        for key, (data_id, name, device_class, state_class, unit, icon) in tank_sensors_config.items():
+            sensor_name = f"{tank_name} {name}"
+            if str(data_id) in actual_tank_data:
+                entities.append(
+                    VrmTankSensor(
+                        coord, site_id, f"{key}_{instance_id}", data_id, sensor_name,
+                        device_class, state_class, unit, icon, dev_info
                     )
+                )
+            elif _diagnostic_record_exists(diagnostics_records, str(data_id), live_id):
+                entities.append(
+                    VrmDiagnosticSensor(
+                        diagnostics_coord, site_id, f"{key}_{instance_id}",
+                        data_id, live_id, sensor_name, device_class, state_class, unit, icon, dev_info
+                    )
+                )
 
     # --- 3.9. Solar Charger Sensoren ---
     solar_charger_sensors_config = {
@@ -981,7 +1057,8 @@ class VrmBaseSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, site_id, key, name, device_class, state_class, unit, icon, device_info):
         super().__init__(coordinator)
         
-        unique_slug = slugify(f"{device_info['name']}_{key}")
+        unique_id_name = device_info.get("_unique_id_name", device_info["name"])
+        unique_slug = slugify(f"{unique_id_name}_{key}")
         # When the sensor is grouped under a parent device, the unique_id must be constructed differently 
         # to avoid conflicts (e.g. when multiple sensors have the same device_info name)
         # For System Overview sensors, the key is already assumed to be unique.
@@ -993,7 +1070,9 @@ class VrmBaseSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit
         self._attr_icon = icon
-        self._attr_device_info = device_info
+        self._attr_device_info = {
+            key: value for key, value in device_info.items() if key != "_unique_id_name"
+        }
         
         # Set display precision based on device class and unit
         if device_class == SensorDeviceClass.VOLTAGE:

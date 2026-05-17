@@ -8,7 +8,7 @@ This is a **Home Assistant custom integration** that connects to the [Victron VR
 - **Integration type**: Hub (cloud polling)
 - **Configuration**: UI-based config flow only (no YAML)
 - **Minimum HA version**: 2025.1
-- **Current version**: 1.5.8
+- **Current version**: 1.6.1
 
 ---
 
@@ -25,14 +25,38 @@ custom_components/victron_vrm_api/   ← Integration source code
     ├── en.json                      ← English UI strings
     └── de.json                      ← German UI strings
 docs/                                ← Screenshots for README
+├── architecture.md                  ← Runtime architecture and diagram
+├── security.md                      ← Boundaries, pitfalls, risk register
 .github/
 ├── workflows/validate.yml           ← HACS validation workflow
+├── skills/                          ← Workspace maintenance skills
 ├── ISSUE_TEMPLATE/                  ← GitHub issue templates
 └── FUNDING.yml                      ← Sponsorship config
+scripts/                             ← Local helpers; not shipped
+tests/                               ← API test/exploration scripts; not shipped
+api_data_*/                          ← Captured API response samples; ignored
 hacs.json                            ← HACS metadata
-test_*.py                            ← API test/exploration scripts
-api_data_*/                          ← Captured API response samples
 ```
+
+## Boundaries, Security, and Pitfalls
+
+- Only `custom_components/victron_vrm_api/` ships to users.
+- Never commit `.env`, real VRM tokens, HA tokens, SSH keys, local deployment targets, or private API captures.
+- Use placeholders in docs. Do not include real-looking token examples.
+- Token fields must use password selectors and reconfigure must not prefill saved tokens.
+- Patch vulnerable behavior before documenting around it.
+- Track repeated mistakes and vulnerabilities in [security.md](security.md).
+- Keep architecture changes in [architecture.md](architecture.md).
+
+Common pitfalls:
+
+| Pitfall | Correct pattern |
+| :--- | :--- |
+| VRM `formattedValue` can be stale | Resolve enum/status values through raw enum data and `dataAttributeEnumValues` first |
+| VRM can list stale and live instances together | Use diagnostics timestamps for instance auto-remap |
+| Missing data can create noisy entities | Create sensors only when the API returns the attribute |
+| Local deploy scripts can leak environment details | Keep them ignored or fully generic |
+| Aggressive polling can cause HTTP 429 | Keep scan intervals conservative |
 
 ---
 
@@ -73,7 +97,7 @@ All configuration is done through the Home Assistant UI. The config flow asks fo
 | Field | Required | Description |
 | :--- | :---: | :--- |
 | **Site ID** | Yes | Your VRM Installation ID |
-| **Token** | Yes | VRM API Bearer token |
+| **Token** | Yes | VRM API token; never commit a real value |
 | **Battery Instance IDs** | No | Comma-separated (e.g., `512` or `288, 291`) |
 | **MultiPlus Instance IDs** | No | Comma-separated (e.g., `257`) |
 | **PV Inverter Instance IDs** | No | Comma-separated (e.g., `200, 201`) |
@@ -127,7 +151,7 @@ This is the main file (~1200 lines) containing:
 | Battery | `widgets/BatterySummary?instance=<id>` | 35 |
 | MultiPlus | `widgets/...?instance=<id>` | 29 |
 | PV Inverter | `widgets/...?instance=<id>` | 16 |
-| Tank | `widgets/...?instance=<id>` | 6 |
+| Tank | `widgets/TankSummary?instance=<id>` + diagnostics fallback | 6 |
 | Solar Charger | `widgets/...?instance=<id>` | 11 |
 | Overall Stats | `stats` (totals for day/week/month/year) | 16 |
 | System Overview | `system-overview` (all detected devices) | 10/device |
@@ -166,7 +190,7 @@ See [DEPLOY_LOCAL.md](DEPLOY_LOCAL.md) for detailed instructions. Quick summary:
 scp -r custom_components/victron_vrm_api root@<HA_IP>:/config/custom_components/
 
 # Option 2: Use the deployment script
-.\deploy_to_ha.ps1
+.\scripts\deploy_to_ha.ps1
 ```
 
 After deploying, restart Home Assistant or reload the integration.
