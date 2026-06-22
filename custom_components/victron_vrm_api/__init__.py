@@ -26,7 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     hass.data.setdefault(DOMAIN, {})
     # Speichere die Konfigurationsdaten (die nur aus entry.data stammen)
-    hass.data[DOMAIN][entry.entry_id] = entry.data 
+    hass.data[DOMAIN][entry.entry_id] = dict(entry.data)
 
     # Lade die Plattformen (sensor.py)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

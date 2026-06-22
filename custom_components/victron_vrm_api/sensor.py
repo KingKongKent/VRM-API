@@ -1,4 +1,5 @@
 """Platform for sensor entities from Victron VRM."""
+import asyncio
 import logging
 from datetime import timedelta, datetime, timezone
 import aiohttp
@@ -29,13 +30,16 @@ from .const import (
     CONF_PV_INVERTER_INSTANCE,
     CONF_TANK_INSTANCE,
     CONF_SOLAR_CHARGER_INSTANCE,
+    CONF_RUNTIME_DISCOVERY,
     DEFAULT_SCAN_INTERVAL_BATTERY,
+    DEFAULT_SCAN_INTERVAL_DISCOVERY,
     DEFAULT_SCAN_INTERVAL_OVERALL,
     DEFAULT_SCAN_INTERVAL_MULTI,
     DEFAULT_SCAN_INTERVAL_PV_INVERTER,
     DEFAULT_SCAN_INTERVAL_TANK,
     DEFAULT_SCAN_INTERVAL_SOLAR_CHARGER,
     DEFAULT_SCAN_INTERVAL_SYSTEM_OVERVIEW,
+    RUNTIME_DISCOVERY_DISABLED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,6 +146,13 @@ _VRM_DBUS_SERVICE_MAP = {
 }
 
 _TANK_DIAGNOSTIC_DATA_IDS = {"328", "329", "330", "331", "443", "638"}
+_KNOWN_DEVICE_CATEGORIES = ("battery", "multi", "pv_inverter", "tank", "solar_charger")
+_STATIC_DIAGNOSTIC_IDS_BY_CATEGORY = {
+    "battery": {"55", "56", "57", "60", "61", "62", "63"},
+    "solar_charger": {"86", "97", "98", "442", "518"},
+    "multi": {"27", "41", "43", "557"},
+    "tank": _TANK_DIAGNOSTIC_DATA_IDS,
+}
 
 
 def _resolve_enum_record_value(record: dict[str, Any]) -> Any:
@@ -300,6 +311,221 @@ def _build_instance_remap(
     return remap
 
 
+def _extract_live_instances(
+    system_overview_data: dict | None,
+    diagnostics_data: dict | None,
+) -> dict[str, list[int]]:
+    """Extract live instances by category from system-overview and diagnostics."""
+    live_instances: dict[str, set[int]] = {category: set() for category in _KNOWN_DEVICE_CATEGORIES}
+
+    if system_overview_data and "devices" in system_overview_data:
+        for device in system_overview_data.get("devices", []):
+            category = _VRM_DEVICE_TYPE_MAP.get(device.get("idDeviceType"))
+            instance = device.get("instance")
+            if category in live_instances and instance is not None:
+                live_instances[category].add(instance)
+
+    # Tanks can be missing from system-overview; discover them from diagnostics.
+    for tank_instance in _build_tank_info_from_diagnostics(diagnostics_data).keys():
+        live_instances["tank"].add(tank_instance)
+
+    return {category: sorted(values) for category, values in live_instances.items()}
+
+
+def _merge_discovered_instances(
+    configured_instances: dict[str, list[int]],
+    live_instances: dict[str, list[int]],
+) -> dict[str, list[int]]:
+    """Merge newly discovered live instances into configured instance lists."""
+    merged: dict[str, list[int]] = {}
+    for category in _KNOWN_DEVICE_CATEGORIES:
+        configured = set(configured_instances.get(category, []))
+        live = set(live_instances.get(category, []))
+        discovered = sorted(live - configured)
+        if discovered:
+            _LOGGER.info(
+                "Discovered VRM %s instance IDs from live data: %s",
+                category,
+                ", ".join(str(instance_id) for instance_id in discovered),
+            )
+        merged[category] = sorted(configured.union(live))
+    return merged
+
+
+def _serialize_instance_ids(instance_ids: list[int]) -> str:
+    """Serialize sorted instance IDs to config string format."""
+    return ", ".join(str(instance_id) for instance_id in sorted(instance_ids))
+
+
+def _collect_known_diagnostic_ids(
+    device_data: dict[str, dict[int, dict[str, Any]]],
+    diagnostics_data: dict | None,
+) -> dict[str, dict[int, set[str]]]:
+    """Collect currently known diagnostics IDs for managed instances."""
+    known: dict[str, dict[int, set[str]]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
+
+    if not diagnostics_data:
+        return known
+
+    live_to_configured: dict[str, dict[int, int]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
+    for category in _KNOWN_DEVICE_CATEGORIES:
+        for configured_instance, data in device_data.get(category, {}).items():
+            live_instance = data.get("live_instance", configured_instance)
+            live_to_configured[category][live_instance] = configured_instance
+
+    for record in diagnostics_data.get("records", []):
+        category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
+        instance = record.get("instance")
+        data_id = record.get("idDataAttribute")
+        if category not in known or instance is None or data_id is None:
+            continue
+
+        configured_instance = live_to_configured.get(category, {}).get(instance)
+        if configured_instance is None:
+            continue
+
+        known[category].setdefault(configured_instance, set()).add(str(data_id))
+
+    return known
+
+
+def _build_dynamic_diagnostic_entities(
+    diagnostics_coord: "VrmDataCoordinator",
+    site_id: str,
+    diagnostics_data: dict | None,
+    device_data: dict[str, dict[int, dict[str, Any]]],
+    created_dynamic_keys: set[str],
+) -> list[SensorEntity]:
+    """Create sensors for diagnostics records that are not statically mapped."""
+    entities: list[SensorEntity] = []
+    if not diagnostics_data:
+        return entities
+
+    for record in diagnostics_data.get("records", []):
+        category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
+        live_instance = record.get("instance")
+        data_id = str(record.get("idDataAttribute"))
+        if category not in device_data or live_instance is None or not data_id or data_id == "None":
+            continue
+
+        if data_id in _STATIC_DIAGNOSTIC_IDS_BY_CATEGORY.get(category, set()):
+            continue
+
+        configured_instance = None
+        for instance_id, data in device_data.get(category, {}).items():
+            if data.get("live_instance", instance_id) == live_instance:
+                configured_instance = instance_id
+                break
+
+        if configured_instance is None:
+            continue
+
+        dynamic_key = f"{category}:{configured_instance}:{data_id}"
+        if dynamic_key in created_dynamic_keys:
+            continue
+
+        data_name = record.get("dataAttributeName") or f"Diagnostic {data_id}"
+        entities.append(
+            VrmDiagnosticSensor(
+                diagnostics_coord,
+                site_id,
+                f"diag_dynamic_{category}_{data_id}_{configured_instance}",
+                data_id,
+                live_instance,
+                data_name,
+                None,
+                None,
+                None,
+                "mdi:chart-line",
+                device_data[category][configured_instance]["device_info"],
+            )
+        )
+        created_dynamic_keys.add(dynamic_key)
+
+    return entities
+
+
+class VrmRuntimeDiscoveryCoordinator(DataUpdateCoordinator):
+    """Detect newly added VRM devices and diagnostics IDs at runtime."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        site_id: str,
+        token: str,
+        managed_instances: dict[str, set[int]],
+        known_diagnostic_ids: dict[str, dict[int, set[str]]],
+    ):
+        """Initialize runtime discovery coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="VRM Runtime Discovery",
+            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL_DISCOVERY),
+        )
+        self._managed_instances = managed_instances
+        self._known_diagnostic_ids = known_diagnostic_ids
+        self._system_overview_coord = VrmDataCoordinator(
+            hass,
+            site_id,
+            token,
+            "system-overview",
+            "VRM Runtime Discovery System Overview",
+            DEFAULT_SCAN_INTERVAL_DISCOVERY,
+        )
+        self._diagnostics_coord = VrmDataCoordinator(
+            hass,
+            site_id,
+            token,
+            "diagnostics",
+            "VRM Runtime Discovery Diagnostics",
+            DEFAULT_SCAN_INTERVAL_DISCOVERY,
+        )
+
+    async def _async_update_data(self):
+        """Return newly discovered instances and diagnostics IDs."""
+        await self._system_overview_coord.async_refresh()
+        await self._diagnostics_coord.async_refresh()
+
+        live_instances = _extract_live_instances(self._system_overview_coord.data, self._diagnostics_coord.data)
+        new_instances: dict[str, list[int]] = {}
+        for category in _KNOWN_DEVICE_CATEGORIES:
+            managed = self._managed_instances.setdefault(category, set())
+            discovered = sorted(set(live_instances.get(category, [])) - managed)
+            if discovered:
+                new_instances[category] = discovered
+                managed.update(discovered)
+
+        new_diagnostic_ids: dict[str, dict[int, list[str]]] = {}
+        live_to_configured: dict[str, dict[int, int]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
+        for category in _KNOWN_DEVICE_CATEGORIES:
+            for configured_instance in self._managed_instances.get(category, set()):
+                live_to_configured[category][configured_instance] = configured_instance
+
+        records = self._diagnostics_coord.data.get("records", []) if self._diagnostics_coord.data else []
+        for record in records:
+            category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
+            instance = record.get("instance")
+            data_id = record.get("idDataAttribute")
+            if category not in _KNOWN_DEVICE_CATEGORIES or instance is None or data_id is None:
+                continue
+            if instance not in self._managed_instances.get(category, set()):
+                continue
+
+            known_for_instance = self._known_diagnostic_ids.setdefault(category, {}).setdefault(instance, set())
+            data_id_str = str(data_id)
+            if data_id_str in known_for_instance:
+                continue
+
+            known_for_instance.add(data_id_str)
+            new_diagnostic_ids.setdefault(category, {}).setdefault(instance, []).append(data_id_str)
+
+        return {
+            "new_instances": new_instances,
+            "new_diagnostic_ids": new_diagnostic_ids,
+        }
+
+
 # --- 3. Setup-Funktion -----------------------------------------------------------
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up VRM sensors from a config entry."""
@@ -316,6 +542,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     configured_tank_instance_ids = _parse_instance_ids(config_data.get(CONF_TANK_INSTANCE, ""))
     tank_instance_ids = list(configured_tank_instance_ids)
     solar_charger_instance_ids = _parse_instance_ids(config_data.get(CONF_SOLAR_CHARGER_INSTANCE, ""))
+
+    configured_instances = {
+        "battery": battery_instance_ids,
+        "multi": multi_instance_ids,
+        "pv_inverter": pv_inverter_instance_ids,
+        "tank": tank_instance_ids,
+        "solar_charger": solar_charger_instance_ids,
+    }
     
     
     # Define endpoints (static endpoints)
@@ -391,14 +625,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     except Exception as err:
         _LOGGER.warning("Could not fetch diagnostics for instance detection: %s", err)
 
+    live_instances = _extract_live_instances(system_overview_coord.data, diagnostics_coord.data)
+    merged_instances = _merge_discovered_instances(configured_instances, live_instances)
+
+    battery_instance_ids = merged_instances["battery"]
+    multi_instance_ids = merged_instances["multi"]
+    pv_inverter_instance_ids = merged_instances["pv_inverter"]
+    tank_instance_ids = merged_instances["tank"]
+    solar_charger_instance_ids = merged_instances["solar_charger"]
+
     diagnostics_tank_info = _build_tank_info_from_diagnostics(diagnostics_coord.data)
-    discovered_tank_ids = sorted(set(diagnostics_tank_info) - set(tank_instance_ids))
-    if discovered_tank_ids:
-        tank_instance_ids = sorted(set(tank_instance_ids).union(discovered_tank_ids))
-        _LOGGER.info(
-            "Discovered VRM tank instance IDs from diagnostics: %s",
-            ", ".join(str(instance_id) for instance_id in discovered_tank_ids),
-        )
 
     instance_remap = _build_instance_remap(
         system_overview_coord.data,
@@ -549,6 +785,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             await coordinator.async_config_entry_first_refresh()
         except Exception as err:
             _LOGGER.warning("Initial refresh of %s coordinator failed: %s", coordinator.name, err)
+
+    runtime_state = hass.data[DOMAIN][entry.entry_id].setdefault("runtime", {})
+    runtime_state["device_data"] = device_data
+    runtime_state["diagnostics_coord"] = diagnostics_coord
+    runtime_state["site_id"] = site_id
+    runtime_state["managed_instances"] = {
+        category: set(device_data.get(category, {}).keys())
+        for category in _KNOWN_DEVICE_CATEGORIES
+    }
+    runtime_state["known_diagnostic_ids"] = _collect_known_diagnostic_ids(device_data, diagnostics_coord.data)
+    runtime_state["dynamic_diagnostic_keys"] = set()
+    runtime_state["reload_lock"] = asyncio.Lock()
 
 
     entities: list[SensorEntity] = []
@@ -1048,7 +1296,74 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                         )
                         break
 
+    entities.extend(
+        _build_dynamic_diagnostic_entities(
+            diagnostics_coord,
+            site_id,
+            diagnostics_coord.data,
+            device_data,
+            runtime_state["dynamic_diagnostic_keys"],
+        )
+    )
+
     async_add_entities(entities, True)
+
+    if config_data.get(CONF_RUNTIME_DISCOVERY, "enabled") == RUNTIME_DISCOVERY_DISABLED:
+        return
+
+    entry_conf_key_by_category = {
+        "battery": CONF_BATTERY_INSTANCE,
+        "multi": CONF_MULTI_INSTANCE,
+        "pv_inverter": CONF_PV_INVERTER_INSTANCE,
+        "tank": CONF_TANK_INSTANCE,
+        "solar_charger": CONF_SOLAR_CHARGER_INSTANCE,
+    }
+
+    runtime_discovery_coord = VrmRuntimeDiscoveryCoordinator(
+        hass,
+        site_id,
+        token,
+        runtime_state["managed_instances"],
+        runtime_state["known_diagnostic_ids"],
+    )
+    runtime_state["runtime_discovery_coord"] = runtime_discovery_coord
+
+    async def _process_runtime_discovery_update() -> None:
+        async with runtime_state["reload_lock"]:
+            data = runtime_discovery_coord.data or {}
+            new_instances = data.get("new_instances", {})
+            has_new_instances = any(new_instances.get(category) for category in _KNOWN_DEVICE_CATEGORIES)
+            if has_new_instances:
+                updated_data = dict(entry.data)
+                for category, conf_key in entry_conf_key_by_category.items():
+                    if category not in new_instances:
+                        continue
+                    current_ids = set(_parse_instance_ids(updated_data.get(conf_key, "")))
+                    current_ids.update(new_instances[category])
+                    updated_data[conf_key] = _serialize_instance_ids(sorted(current_ids))
+
+                _LOGGER.info("Runtime discovery detected new instances. Reloading integration entry %s.", entry.entry_id)
+                hass.config_entries.async_update_entry(entry, data=updated_data)
+                hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+                return
+
+            new_dynamic_entities = _build_dynamic_diagnostic_entities(
+                diagnostics_coord,
+                site_id,
+                runtime_discovery_coord._diagnostics_coord.data,
+                device_data,
+                runtime_state["dynamic_diagnostic_keys"],
+            )
+            if new_dynamic_entities:
+                _LOGGER.info("Runtime discovery adding %d new diagnostics sensors.", len(new_dynamic_entities))
+                async_add_entities(new_dynamic_entities, True)
+
+    def _runtime_discovery_listener() -> None:
+        hass.async_create_task(_process_runtime_discovery_update())
+
+    unsub_discovery = runtime_discovery_coord.async_add_listener(_runtime_discovery_listener)
+    entry.async_on_unload(unsub_discovery)
+    await runtime_discovery_coord.async_refresh()
 
 
 # --- 5. Basisklasse für Sensoren -----------

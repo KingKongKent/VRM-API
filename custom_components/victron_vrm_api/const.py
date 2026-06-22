@@ -11,6 +11,7 @@ CONF_MULTI_INSTANCE = "multi_instance_ids"          # Instance IDs des MultiPlus
 CONF_PV_INVERTER_INSTANCE = "pv_instance_ids"       # Instance IDs des PV Inverters (String: '200, 201')
 CONF_TANK_INSTANCE = "tank_instance_ids"            # Instance IDs des Tanks (String: '300')
 CONF_SOLAR_CHARGER_INSTANCE = "solar_charger_ids"   # Instance IDs des Solar Chargers (String: '400, 401')
+CONF_RUNTIME_DISCOVERY = "runtime_discovery"        # Runtime discovery mode (enabled/disabled)
 
 # Standard-Aktualisierungsintervalle (in Sekunden)
 DEFAULT_SCAN_INTERVAL_BATTERY = 20           # 20 Sekunden
@@ -20,3 +21,7 @@ DEFAULT_SCAN_INTERVAL_TANK = 60              # 60 Sekunden
 DEFAULT_SCAN_INTERVAL_SOLAR_CHARGER = 20     # 20 Sekunden 
 DEFAULT_SCAN_INTERVAL_OVERALL = 300          # 5 Minuten
 DEFAULT_SCAN_INTERVAL_SYSTEM_OVERVIEW = 1200 # 20 Minuten 
+DEFAULT_SCAN_INTERVAL_DISCOVERY = 1800       # 30 Minuten
+
+RUNTIME_DISCOVERY_ENABLED = "enabled"
+RUNTIME_DISCOVERY_DISABLED = "disabled"
