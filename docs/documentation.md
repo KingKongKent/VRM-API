@@ -1,6 +1,6 @@
 # Victron VRM API — Full Documentation
 
-> **Version**: 1.6.1 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
+> **Version**: 1.6.3 &nbsp;|&nbsp; **Minimum HA**: 2025.1 &nbsp;|&nbsp; **Domain**: `victron_vrm_api`
 
 A Home Assistant custom integration that pulls real-time data from the [Victron VRM Portal](https://vrm.victronenergy.com/) API. Supports Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, and Diagnostics devices — creating **134+ sensors** from a single configuration.
 
@@ -99,6 +99,10 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 | **PV Inverter** | up to 17 | Per-phase voltage, current, power, energy yields |
 | **Tank** | up to 6 | Level, capacity, remaining, type, status; diagnostics discovery/fallback |
 | **Solar Charger** | up to 16 | PV voltage/current, charge state, yields, diagnostics |
+| **Expansion I/O** | 1 | Output state from diagnostics |
+| **Digital Input** | up to 4 | State, alarm, count, and input type |
+| **Temperature** | up to 2 | Temperature and humidity |
+| **Gateway/System** | varies | Health, storage, relays, and aggregate power |
 | **Overall Stats** | 16 | Solar yield, consumption, grid in/out for day/week/month/year |
 | **System Overview** | 10 per device | Firmware, serial, connection info for all detected devices |
 | **Total** | **134+** | Depends on your installation |
@@ -118,9 +122,12 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 | Battery Temperature | `115` | °C | Battery temperature |
 | Minimum Cell Voltage | `173` | V | Min cell voltage (BMS) |
 | Maximum Cell Voltage | `174` | V | Max cell voltage (BMS) |
-| Mid Voltage | `64` | V | Mid-point voltage |
+| Automatic Syncs | `64` | — | Automatic synchronization count |
 | Battery Power | *calc* | W | Calculated (V × A) |
 | Battery Charge Cycles | `58` | — | Full charge cycle count |
+| Full Discharges | `59` | — | Full discharge count |
+| Low/High Voltage Alarm Count | `65`/`66` | — | Historical alarm counts |
+| Discharged/Charged Energy | `244`/`245` | kWh | Lifetime energy counters |
 | Battery to Consumers (Today) | `Bc` | kWh | Energy to load today |
 | Battery to Grid (Today) | `Bg` | kWh | Energy to grid today |
 
@@ -168,24 +175,24 @@ All configuration is handled through the Home Assistant UI — no YAML configura
 
 | Sensor Name | VRM ID | Unit | Description |
 | :--- | :---: | :---: | :--- |
-| AC Input Frequency | `6` | Hz | AC input frequency |
+| AC Input Frequency | `14` | Hz | AC input frequency |
 | AC Input Voltage L1/L2/L3 | `8`/`9`/`10` | V | AC input voltage per phase |
 | AC Input Current L1/L2/L3 | `11`/`12`/`13` | A | AC input current per phase |
 | AC Input Power L1/L2/L3 | `17`/`18`/`19` | W | AC input power per phase |
 | AC Output Voltage L1/L2/L3 | `20`/`21`/`22` | V | AC output voltage per phase |
-| AC Output Frequency | `23` | Hz | AC output frequency |
-| AC Output Current L1/L2/L3 | `14`/`15`/`16` | A | AC output current per phase |
+| AC Output Frequency | `26` | Hz | AC output frequency |
+| AC Output Current L1/L2/L3 | `23`/`24`/`25` | A | AC output current per phase |
 | AC Output Power L1/L2/L3 | `29`/`30`/`31` | W | AC output power per phase |
 | DC Bus Voltage | `32` | V | DC bus voltage |
 | DC Bus Current | `33` | A | DC bus current |
 | DC Bus Power | *calc* | W | Calculated (DC V × DC A) |
 | Active Input Source | `35` | — | Grid/Generator/Shore |
 | VE.Bus State | `40` | — | Operating state |
-| Switch Position | `44` | — | Charger/Inverter/On/Off |
+| Switch Position | `79` diagnostics | — | Charger/Inverter/On/Off |
 | Grid Setpoint | `242` | W | ESS grid setpoint target |
 | SOC Limit | `243` | % | ESS minimum SOC limit |
 | Active SOC Limit | `244` | % | ESS active SOC limit |
-| MultiPlus Temperature | `521` | °C | Device temperature |
+| Battery Temperature | `521` | °C | VE.Bus battery temperature |
 | Grid to Consumers (Today) | `Gc` | kWh | Energy from grid to load today |
 | Grid to Battery (Today) | `Gb` | kWh | Energy from grid to battery today |
 
@@ -236,26 +243,34 @@ Tank instances are normally queried through `widgets/TankSummary`. If VRM omits 
 | Sensor Name | VRM ID | Unit | Description |
 | :--- | :---: | :---: | :--- |
 | Battery Voltage | `81` | V | Battery voltage |
-| PV Voltage | `82` | V | Solar panel voltage |
 | Battery Temperature | `83` | °C | Battery temperature (external) |
-| PV Current | `84` | A | Solar panel current |
 | Charge State | `85` | — | Bulk / Absorption / Float |
 | Error Code | `88` | — | Error code |
 | Relay Status | `90` | — | Relay state |
 | Yield Today | `94` | kWh | Energy yield today |
-| Max Power Today | `95` | W | Maximum power today |
 | Yield Yesterday | `96` | kWh | Energy yield yesterday |
 | Battery Watts | `107` | W | Charging power to battery |
 
-#### Solar Charger Diagnostics (5 sensors per instance)
+#### Solar Charger Diagnostics
 
 | Sensor Name | VRM ID | Unit | Description |
 | :--- | :---: | :---: | :--- |
-| PV Voltage (diag) | `86` | V | PV voltage (alternate source) |
+| Charge Current | `82` | A | Charger output current |
+| Charger Enabled | `84` | — | Charger on/off state |
+| PV Voltage | `86` | V | PV input voltage |
+| PV Current | `442 / 86` | A | Calculated PV input current |
+| Max Power Today | `95` | W | Maximum charge power today |
 | Max Power Yesterday | `97` | W | Maximum power yesterday |
-| Error Code (diag) | `98` | — | Error code (alternate source) |
+| Error Code | `98` | — | Charger error code |
+| Load State | `241` | — | Charger load-output state |
+| Lifetime Yield | `285` | kWh | Lifetime user yield |
 | PV Power | `442` | W | Current PV power |
 | MPPT State | `518` | — | MPPT tracker state |
+| Off Reason | `583` | — | Reason charger is off |
+
+### Diagnostics-only Devices
+
+Expansion I/O exposes state `1869`. Digital inputs expose alarm `465`, state `466`, count `467`, and type `468`. Temperature services expose temperature `450` and humidity `920`. The Gateway/System device exposes a curated set of update, storage, process, relay, battery, PV, and consumption values. Private network data, GPS coordinates, serial numbers, hashes, settings, and low-level raw flags are not promoted to Home Assistant entities.
 
 ---
 
@@ -604,6 +619,15 @@ After deploying:
 ---
 
 ## Changelog
+
+### v1.6.3 — Live VRM coverage audit
+- **Fix**: Correct current VRM device types so Expansion I/O is not discovered as PV inverter and tanks using type `5` are discovered.
+- **Fix**: Correct VE.Bus frequency/current IDs and battery history ID `64` semantics.
+- **Feature**: Add charger output current and calculated PV input current, plus expanded solar diagnostics.
+- **Feature**: Add operational Expansion I/O, digital input, temperature/humidity, and Gateway/System diagnostics.
+- **Fix**: Preserve configured identities during remap without creating duplicate entities for remap targets, and clean persisted Expansion I/O IDs from PV inverter configuration.
+- **Improvement**: Report VRM rate-limit `Retry-After` guidance and add a discovery-based value inventory tool.
+- **Cleanup**: Only curated, named operational diagnostics become entities. Generic `Diagnostic <id>` entities and empty stale devices are removed automatically during setup.
 
 ### v1.6.1 — Tank diagnostics discovery
 - **Feature**: Discover tank instances from diagnostics when VRM collects them but omits them from `system-overview`.

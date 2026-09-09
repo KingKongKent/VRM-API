@@ -2,7 +2,7 @@
 
 ## Project
 Home Assistant custom integration that polls the Victron VRM Portal API.
-Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.6.1
+Domain: `victron_vrm_api` | Min HA: 2025.1 | Current: v1.6.3
 
 ## Repository Layout
 ```
@@ -33,6 +33,8 @@ tests/                   API test/exploration scripts (not shipped)
 11. **Token safety**: Do not prefill saved tokens into reconfigure forms, logs, docs, screenshots, terminal output, or examples. Use password selectors for token input and placeholders in docs.
 12. **Boundary discipline**: Keep local HA targets, operator scripts, captured API payloads, and `.env` files out of tracked shipped code. Commit generic docs only.
 13. **Security tracking**: When a vulnerability or repeated mistake is found, patch it, then record it in `docs/security.md` and update these instructions if the lesson should persist.
+14. **Current device types**: Live system-overview uses type 3 for Expansion I/O, type 5 for Tank, and type 20 for Digital Input. Match diagnostics by service type + instance + attribute ID.
+15. **Solar meanings**: Diagnostics 82 is charger output current, 84 is charger on/off, 86 is PV voltage, and 442 is PV power. Calculate PV input current as 442 / 86 when voltage is positive.
 
 ## Pitfalls To Avoid
 - Do not trust VRM `formattedValue` for enum/status sensors; it can be stale.

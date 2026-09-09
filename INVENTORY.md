@@ -1,6 +1,6 @@
 # Inventory — Victron VRM API for Home Assistant
 
-> Last updated: 2026-05-17 | Version: **1.6.1**
+> Last updated: 2026-09-09 | Version: **1.6.3**
 
 ## What Ships to Users
 
@@ -39,9 +39,11 @@ Only `custom_components/victron_vrm_api/` is distributed (via HACS or manual cop
 │   └── *.png                            Screenshots for README
 ├── scripts/                             ← developer utilities (not shipped)
 │   ├── README.md                        Script boundary and safety rules
+│   ├── vrm_value_inventory.py           Live/captured device value inventory
 │   └── deploy_to_ha.ps1                 SCP / file-share deploy helper
 ├── tests/                               ← API test scripts (not shipped)
 │   ├── test_vrm_api.py                  Basic API connectivity test
+│   ├── test_sensor_logic.py              Focused discovery/value regression tests
 │   ├── test_all_endpoints.py            Full endpoint sweep
 │   ├── test_analyze_data.py             Analyse captured JSON responses
 │   ├── test_device_comparison.py        HA entity vs API data comparison
@@ -70,6 +72,10 @@ Only `custom_components/victron_vrm_api/` is distributed (via HACS or manual cop
 | PV Inverter | 16 | `widgets/PVInverterStatus` | 20 s |
 | Tank | 6 | `widgets/TankSummary`, diagnostics fallback | 60 s |
 | Solar Charger | 11 | `widgets/SolarChargerSummary`, diagnostics | 20 s |
+| Expansion I/O | 1/output | `diagnostics` | 300 s |
+| Digital Input | up to 4/input | `diagnostics` | 300 s |
+| Temperature | up to 2/probe | `diagnostics` | 300 s |
+| Gateway/System | varies | `diagnostics` | 300 s |
 | Overall Stats | 16 | `overallstats`, `stats` (kWh) | 300 s |
 | System Overview | 10/dev | `system-overview` | 1200 s |
 | Diagnostics | varies | `diagnostics` | 300 s |

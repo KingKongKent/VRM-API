@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import slugify
@@ -72,6 +73,16 @@ class VrmDataCoordinator(DataUpdateCoordinator):
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(url, headers=headers, timeout=timeout) as response:
+                if response.status == 429:
+                    retry_after = response.headers.get("Retry-After", "unknown")
+                    _LOGGER.warning(
+                        "VRM API rate limit at %s; retry after %s seconds",
+                        self.endpoint,
+                        retry_after,
+                    )
+                    raise UpdateFailed(
+                        f"VRM API rate limit at {self.endpoint}; retry after {retry_after} seconds"
+                    )
                 if response.status not in (200, 204):
                     _LOGGER.error("API error at %s: Status %d", self.endpoint, response.status)
                     raise UpdateFailed(f"API error at {self.endpoint}: Status {response.status}")
@@ -99,12 +110,11 @@ class VrmDataCoordinator(DataUpdateCoordinator):
 
                 return data
 
-        except aiohttp.ClientError as err:
+        except UpdateFailed:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             _LOGGER.error("Connection error while fetching data for %s: %s", self.endpoint, err)
             raise UpdateFailed(f"Connection error: {err}")
-        except Exception as err:
-            _LOGGER.error("Unknown error while fetching data for %s: %s", self.endpoint, err)
-            raise UpdateFailed(f"Unknown error: {err}")
 
 
 # --- 2. Hilfsfunktion zur ID-Verarbeitung -----------------------------------------
@@ -131,9 +141,10 @@ def _parse_instance_ids(config_string: str) -> list[int]:
 _VRM_DEVICE_TYPE_MAP = {
     1: "multi",          # VE.Bus System (MultiPlus / Quattro)
     2: "battery",        # Battery Monitor (BMV / SmartShunt)
-    3: "pv_inverter",    # PV Inverter (Fronius, SMA, …)
+    # Type 3 is Expansion I/O in current VRM system-overview payloads.
     4: "solar_charger",  # Solar Charger (BlueSolar / SmartSolar MPPT)
-    12: "tank",          # Tank sensor
+    5: "tank",           # Tank sensor
+    12: "tank",          # Legacy tank type retained for compatibility
 }
 
 # Diagnostics dbusServiceType → internal category (for freshness detection)
@@ -147,11 +158,51 @@ _VRM_DBUS_SERVICE_MAP = {
 
 _TANK_DIAGNOSTIC_DATA_IDS = {"328", "329", "330", "331", "443", "638"}
 _KNOWN_DEVICE_CATEGORIES = ("battery", "multi", "pv_inverter", "tank", "solar_charger")
-_STATIC_DIAGNOSTIC_IDS_BY_CATEGORY = {
-    "battery": {"55", "56", "57", "60", "61", "62", "63"},
-    "solar_charger": {"86", "97", "98", "442", "518"},
-    "multi": {"27", "41", "43", "557"},
-    "tank": _TANK_DIAGNOSTIC_DATA_IDS,
+_AUXILIARY_DIAGNOSTIC_CONFIG = {
+    "switch": {
+        "1869": ("State", None, None, None, "mdi:electric-switch"),
+    },
+    "digitalinput": {
+        "465": ("Alarm", None, None, None, "mdi:alert-circle-outline"),
+        "466": ("State", None, None, None, "mdi:electric-switch"),
+        "467": ("Count", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:counter"),
+        "468": ("Type", None, None, None, "mdi:information-outline"),
+    },
+    "temperature": {
+        "450": ("Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
+        "920": ("Humidity", SensorDeviceClass.HUMIDITY, SensorStateClass.MEASUREMENT, "%", "mdi:water-percent"),
+    },
+    "gateway": {
+        "558": ("Update Status", None, None, None, "mdi:update"),
+        "577": ("D-Bus Round-trip Time", SensorDeviceClass.DURATION, SensorStateClass.MEASUREMENT, "ms", "mdi:timer-outline"),
+        "278": ("Root Filesystem Free Space", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT, "B", "mdi:harddisk"),
+        "279": ("Data Partition Free Space", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT, "B", "mdi:harddisk"),
+        "470": ("Hung Processes", None, SensorStateClass.MEASUREMENT, None, "mdi:alert"),
+        "479": ("Zombie Processes", None, SensorStateClass.MEASUREMENT, None, "mdi:alert"),
+        "480": ("Data Partition Status", None, None, None, "mdi:harddisk"),
+        "1900": ("Machine Uptime", SensorDeviceClass.DURATION, SensorStateClass.TOTAL_INCREASING, "s", "mdi:timer-outline"),
+        "1902": ("Process Crash Count", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:counter"),
+    },
+    "system": {
+        "113": ("DC-coupled PV Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:solar-power"),
+        "131": ("AC Consumption L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-plug"),
+        "140": ("DC System Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:current-dc"),
+        "143": ("System Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:current-dc"),
+        "144": ("Battery SOC", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, "%", "mdi:battery"),
+        "145": ("Battery Consumed Amphours", None, SensorStateClass.MEASUREMENT, "Ah", "mdi:battery-arrow-down"),
+        "146": ("Battery Time to Go", None, SensorStateClass.MEASUREMENT, "h", "mdi:timer-sand"),
+        "147": ("Battery Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
+        "153": ("VE.Bus Charge Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
+        "215": ("Battery State", None, None, None, "mdi:battery"),
+        "243": ("Battery Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:battery"),
+        "254": ("VE.Bus Charge Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:flash"),
+        "306": ("Relay 1 State", None, None, None, "mdi:electric-switch"),
+        "335": ("Relay 2 State", None, None, None, "mdi:electric-switch"),
+        "567": ("AC Consumption on Output L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-plug"),
+        "571": ("System State", None, None, None, "mdi:state-machine"),
+        "579": ("DVCC Multiple Batteries Alarm", None, None, None, "mdi:alert-circle"),
+        "580": ("DVCC Firmware Alarm", None, None, None, "mdi:alert-circle"),
+    },
 }
 
 
@@ -203,6 +254,39 @@ def _diagnostic_record_exists(records: list[dict[str, Any]], data_id: str, insta
         str(record.get("idDataAttribute")) == data_id and record.get("instance") == instance
         for record in records
     )
+
+
+def _find_diagnostic_record(
+    diagnostics_data: dict | None,
+    data_id: str,
+    instance: int,
+    service_type: str | None = None,
+) -> dict[str, Any] | None:
+    """Find one diagnostics record by attribute, instance, and service."""
+    if not diagnostics_data:
+        return None
+    for record in diagnostics_data.get("records", []):
+        if str(record.get("idDataAttribute")) != str(data_id) or record.get("instance") != instance:
+            continue
+        if service_type is None or record.get("dbusServiceType") == service_type:
+            return record
+    return None
+
+
+def _diagnostic_numeric_value(record: dict[str, Any] | None) -> float | None:
+    """Extract a numeric diagnostics value without depending on its unit text."""
+    if not record:
+        return None
+    raw_value = record.get("rawValue")
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+    formatted_value = record.get("formattedValue")
+    if formatted_value not in (None, ""):
+        try:
+            return float(str(formatted_value).split()[0])
+        except (TypeError, ValueError, IndexError):
+            return None
+    return None
 
 
 def _build_freshness_map(diagnostics_data: dict | None) -> dict[str, dict[int, int]]:
@@ -271,8 +355,9 @@ def _build_instance_remap(
         live_ids = live_by_category.get(category, [])
         sorted_conf = sorted(configured_ids)
         cat_freshness = freshness.get(category, {})
+        claimed_live_ids = {cid for cid in sorted_conf if cid in live_ids}
 
-        for i, cid in enumerate(sorted_conf):
+        for cid in sorted_conf:
             if cid in live_ids:
                 # Configured ID exists in live list — but it might be stale.
                 # Check if a *new* instance (not configured) has fresher data.
@@ -281,11 +366,17 @@ def _build_instance_remap(
                     new_candidates = [
                         (lid, cat_freshness.get(lid, 0))
                         for lid in live_ids
-                        if lid not in sorted_conf and cat_freshness.get(lid, 0) > cid_ts
+                        if lid not in sorted_conf
+                        and lid not in claimed_live_ids
+                        and cat_freshness.get(lid, 0) > cid_ts
                     ]
                     if new_candidates:
-                        best_lid, best_ts = max(new_candidates, key=lambda x: x[1])
+                        best_lid, best_ts = max(
+                            new_candidates,
+                            key=lambda candidate: (candidate[1], -abs(candidate[0] - cid)),
+                        )
                         cat_remap[cid] = best_lid
+                        claimed_live_ids.add(best_lid)
                         _LOGGER.warning(
                             "VRM instance remap for %s: configured %d (ts %d) → "
                             "live %d (ts %d, fresher by %ds).",
@@ -296,15 +387,25 @@ def _build_instance_remap(
                 else:
                     # No diagnostics — trust system-overview as-is
                     cat_remap[cid] = cid
-            elif i < len(live_ids):
-                cat_remap[cid] = live_ids[i]
+            else:
+                candidates = [live_id for live_id in live_ids if live_id not in claimed_live_ids]
+                if not candidates:
+                    cat_remap[cid] = cid
+                    continue
+                live_id = max(
+                    candidates,
+                    key=lambda candidate: (
+                        cat_freshness.get(candidate, 0),
+                        -abs(candidate - cid),
+                    ),
+                )
+                cat_remap[cid] = live_id
+                claimed_live_ids.add(live_id)
                 _LOGGER.warning(
                     "VRM instance ID changed for %s: configured %d → live %d. "
                     "Entities keep their original IDs; API calls use the new instance.",
-                    category, cid, live_ids[i],
+                    category, cid, live_id,
                 )
-            else:
-                cat_remap[cid] = cid
 
         remap[category] = cat_remap
 
@@ -335,20 +436,22 @@ def _extract_live_instances(
 def _merge_discovered_instances(
     configured_instances: dict[str, list[int]],
     live_instances: dict[str, list[int]],
+    instance_remap: dict[str, dict[int, int]],
 ) -> dict[str, list[int]]:
     """Merge newly discovered live instances into configured instance lists."""
     merged: dict[str, list[int]] = {}
     for category in _KNOWN_DEVICE_CATEGORIES:
         configured = set(configured_instances.get(category, []))
         live = set(live_instances.get(category, []))
-        discovered = sorted(live - configured)
+        claimed_live = set(instance_remap.get(category, {}).values())
+        discovered = sorted(live - claimed_live)
         if discovered:
             _LOGGER.info(
                 "Discovered VRM %s instance IDs from live data: %s",
                 category,
                 ", ".join(str(instance_id) for instance_id in discovered),
             )
-        merged[category] = sorted(configured.union(live))
+        merged[category] = sorted(configured.union(discovered))
     return merged
 
 
@@ -357,92 +460,132 @@ def _serialize_instance_ids(instance_ids: list[int]) -> str:
     return ", ".join(str(instance_id) for instance_id in sorted(instance_ids))
 
 
-def _collect_known_diagnostic_ids(
-    device_data: dict[str, dict[int, dict[str, Any]]],
-    diagnostics_data: dict | None,
-) -> dict[str, dict[int, set[str]]]:
-    """Collect currently known diagnostics IDs for managed instances."""
-    known: dict[str, dict[int, set[str]]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
-
-    if not diagnostics_data:
-        return known
-
-    live_to_configured: dict[str, dict[int, int]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
-    for category in _KNOWN_DEVICE_CATEGORIES:
-        for configured_instance, data in device_data.get(category, {}).items():
-            live_instance = data.get("live_instance", configured_instance)
-            live_to_configured[category][live_instance] = configured_instance
-
-    for record in diagnostics_data.get("records", []):
-        category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
-        instance = record.get("instance")
-        data_id = record.get("idDataAttribute")
-        if category not in known or instance is None or data_id is None:
-            continue
-
-        configured_instance = live_to_configured.get(category, {}).get(instance)
-        if configured_instance is None:
-            continue
-
-        known[category].setdefault(configured_instance, set()).add(str(data_id))
-
-    return known
+def _auxiliary_device_name(
+    records: list[dict[str, Any]], service_type: str, instance: int
+) -> str:
+    """Resolve a useful diagnostics-only device name."""
+    name_ids = {
+        "switch": "1866",
+        "digitalinput": "593",
+        "temperature": "637",
+    }
+    name_id = name_ids.get(service_type)
+    if name_id:
+        for record in records:
+            if str(record.get("idDataAttribute")) == name_id and record.get("instance") == instance:
+                value = _resolve_enum_record_value(record)
+                if value:
+                    return str(value)
+    fallback = {
+        "switch": "Expansion I/O",
+        "digitalinput": "Digital Input",
+        "temperature": "Temperature Sensor",
+        "gateway": "Gateway",
+        "system": "System",
+    }
+    return f"{fallback.get(service_type, service_type.title())} {instance}".strip()
 
 
-def _build_dynamic_diagnostic_entities(
+def _build_auxiliary_diagnostic_entities(
     diagnostics_coord: "VrmDataCoordinator",
     site_id: str,
     diagnostics_data: dict | None,
-    device_data: dict[str, dict[int, dict[str, Any]]],
-    created_dynamic_keys: set[str],
+    created_keys: set[str],
+    hub_device_info: dict[str, Any],
 ) -> list[SensorEntity]:
-    """Create sensors for diagnostics records that are not statically mapped."""
+    """Create curated sensors for diagnostics-only operational device families."""
     entities: list[SensorEntity] = []
     if not diagnostics_data:
         return entities
+    records = diagnostics_data.get("records", [])
 
-    for record in diagnostics_data.get("records", []):
-        category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
-        live_instance = record.get("instance")
-        data_id = str(record.get("idDataAttribute"))
-        if category not in device_data or live_instance is None or not data_id or data_id == "None":
-            continue
+    for service_type, config in _AUXILIARY_DIAGNOSTIC_CONFIG.items():
+        service_records = [
+            record for record in records if record.get("dbusServiceType") == service_type
+        ]
+        for record in service_records:
+            data_id = str(record.get("idDataAttribute"))
+            if data_id not in config or record.get("instance") is None:
+                continue
+            instance = int(record["instance"])
+            entity_key = f"{service_type}:{instance}:{data_id}"
+            if entity_key in created_keys:
+                continue
 
-        if data_id in _STATIC_DIAGNOSTIC_IDS_BY_CATEGORY.get(category, set()):
-            continue
-
-        configured_instance = None
-        for instance_id, data in device_data.get(category, {}).items():
-            if data.get("live_instance", instance_id) == live_instance:
-                configured_instance = instance_id
-                break
-
-        if configured_instance is None:
-            continue
-
-        dynamic_key = f"{category}:{configured_instance}:{data_id}"
-        if dynamic_key in created_dynamic_keys:
-            continue
-
-        data_name = record.get("dataAttributeName") or f"Diagnostic {data_id}"
-        entities.append(
-            VrmDiagnosticSensor(
-                diagnostics_coord,
-                site_id,
-                f"diag_dynamic_{category}_{data_id}_{configured_instance}",
-                data_id,
-                live_instance,
-                data_name,
-                None,
-                None,
-                None,
-                "mdi:chart-line",
-                device_data[category][configured_instance]["device_info"],
+            name, device_class, state_class, unit, icon = config[data_id]
+            if service_type in {"gateway", "system"} and instance == 0:
+                device_info = hub_device_info
+            else:
+                device_name = _auxiliary_device_name(records, service_type, instance)
+                device_info = {
+                    "identifiers": {(DOMAIN, f"{site_id}_{service_type}_{instance}")},
+                    "name": device_name,
+                    "manufacturer": "Victron VRM API",
+                    "model": service_type,
+                }
+            entities.append(
+                VrmDiagnosticSensor(
+                    diagnostics_coord,
+                    site_id,
+                    f"aux_{service_type}_{data_id}_{instance}",
+                    data_id,
+                    instance,
+                    name,
+                    device_class,
+                    state_class,
+                    unit,
+                    icon,
+                    device_info,
+                    service_type=service_type,
+                )
             )
-        )
-        created_dynamic_keys.add(dynamic_key)
-
+            created_keys.add(entity_key)
     return entities
+
+
+def _cleanup_obsolete_registry_entries(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    active_unique_ids: set[str],
+) -> None:
+    """Remove obsolete entities and empty devices owned by this config entry."""
+    entity_registry = er.async_get(hass)
+    obsolete_entity_ids = [
+        entity.entity_id
+        for entity in entity_registry.entities.values()
+        if entity.config_entry_id == entry.entry_id
+        and entity.platform == DOMAIN
+        and entity.unique_id not in active_unique_ids
+    ]
+    for entity_id in obsolete_entity_ids:
+        entity_registry.async_remove(entity_id)
+
+    if obsolete_entity_ids:
+        entity_registry.async_schedule_save()
+        _LOGGER.info(
+            "Removed %d obsolete VRM sensor registry entries",
+            len(obsolete_entity_ids),
+        )
+
+    referenced_device_ids = {
+        entity.device_id
+        for entity in entity_registry.entities.values()
+        if entity.device_id is not None
+    }
+    device_registry = dr.async_get(hass)
+    obsolete_device_ids = [
+        device.id
+        for device in device_registry.devices.values()
+        if entry.entry_id in device.config_entries
+        and device.id not in referenced_device_ids
+        and any(identifier[0] == DOMAIN for identifier in device.identifiers)
+    ]
+    for device_id in obsolete_device_ids:
+        device_registry.async_remove_device(device_id)
+
+    if obsolete_device_ids:
+        device_registry.async_schedule_save()
+        _LOGGER.info("Removed %d empty VRM devices", len(obsolete_device_ids))
 
 
 class VrmRuntimeDiscoveryCoordinator(DataUpdateCoordinator):
@@ -454,7 +597,6 @@ class VrmRuntimeDiscoveryCoordinator(DataUpdateCoordinator):
         site_id: str,
         token: str,
         managed_instances: dict[str, set[int]],
-        known_diagnostic_ids: dict[str, dict[int, set[str]]],
     ):
         """Initialize runtime discovery coordinator."""
         super().__init__(
@@ -464,7 +606,6 @@ class VrmRuntimeDiscoveryCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL_DISCOVERY),
         )
         self._managed_instances = managed_instances
-        self._known_diagnostic_ids = known_diagnostic_ids
         self._system_overview_coord = VrmDataCoordinator(
             hass,
             site_id,
@@ -496,34 +637,7 @@ class VrmRuntimeDiscoveryCoordinator(DataUpdateCoordinator):
                 new_instances[category] = discovered
                 managed.update(discovered)
 
-        new_diagnostic_ids: dict[str, dict[int, list[str]]] = {}
-        live_to_configured: dict[str, dict[int, int]] = {category: {} for category in _KNOWN_DEVICE_CATEGORIES}
-        for category in _KNOWN_DEVICE_CATEGORIES:
-            for configured_instance in self._managed_instances.get(category, set()):
-                live_to_configured[category][configured_instance] = configured_instance
-
-        records = self._diagnostics_coord.data.get("records", []) if self._diagnostics_coord.data else []
-        for record in records:
-            category = _VRM_DBUS_SERVICE_MAP.get(record.get("dbusServiceType"))
-            instance = record.get("instance")
-            data_id = record.get("idDataAttribute")
-            if category not in _KNOWN_DEVICE_CATEGORIES or instance is None or data_id is None:
-                continue
-            if instance not in self._managed_instances.get(category, set()):
-                continue
-
-            known_for_instance = self._known_diagnostic_ids.setdefault(category, {}).setdefault(instance, set())
-            data_id_str = str(data_id)
-            if data_id_str in known_for_instance:
-                continue
-
-            known_for_instance.add(data_id_str)
-            new_diagnostic_ids.setdefault(category, {}).setdefault(instance, []).append(data_id_str)
-
-        return {
-            "new_instances": new_instances,
-            "new_diagnostic_ids": new_diagnostic_ids,
-        }
+        return {"new_instances": new_instances}
 
 
 # --- 3. Setup-Funktion -----------------------------------------------------------
@@ -597,7 +711,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "name": "Stats Overall",
         "manufacturer": "Victron VRM API",
         "model": "Overall Statistics",
-        "via_device": (DOMAIN, site_id),
     }
 
     # Define the System Overview device (the parent device under which all entities are grouped)
@@ -606,7 +719,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "name": "System Overview",
         "manufacturer": "Victron Energy",
         "model": "Device List",
-        "via_device": (DOMAIN, site_id),
     }
     
     # Temporary list of all dynamic coordinators for initial refresh
@@ -626,7 +738,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _LOGGER.warning("Could not fetch diagnostics for instance detection: %s", err)
 
     live_instances = _extract_live_instances(system_overview_coord.data, diagnostics_coord.data)
-    merged_instances = _merge_discovered_instances(configured_instances, live_instances)
+
+    expansion_io_instances = {
+        device.get("instance")
+        for device in (system_overview_coord.data or {}).get("devices", [])
+        if device.get("idDeviceType") == 3 and device.get("productName") == "Expansion IO"
+    }
+    misclassified_pv_instances = set(pv_inverter_instance_ids).intersection(expansion_io_instances)
+    if misclassified_pv_instances:
+        pv_inverter_instance_ids = sorted(set(pv_inverter_instance_ids) - misclassified_pv_instances)
+        configured_instances["pv_inverter"] = pv_inverter_instance_ids
+        updated_entry_data = dict(entry.data)
+        updated_entry_data[CONF_PV_INVERTER_INSTANCE] = _serialize_instance_ids(pv_inverter_instance_ids)
+        hass.config_entries.async_update_entry(entry, data=updated_entry_data)
+        _LOGGER.warning(
+            "Removed Expansion I/O instances incorrectly stored as PV inverters: %s",
+            ", ".join(str(instance_id) for instance_id in sorted(misclassified_pv_instances)),
+        )
+
+    instance_remap = _build_instance_remap(
+        system_overview_coord.data,
+        diagnostics_coord.data,
+        configured_instances,
+    )
+    merged_instances = _merge_discovered_instances(
+        configured_instances, live_instances, instance_remap
+    )
 
     battery_instance_ids = merged_instances["battery"]
     multi_instance_ids = merged_instances["multi"]
@@ -635,18 +772,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     solar_charger_instance_ids = merged_instances["solar_charger"]
 
     diagnostics_tank_info = _build_tank_info_from_diagnostics(diagnostics_coord.data)
-
-    instance_remap = _build_instance_remap(
-        system_overview_coord.data,
-        diagnostics_coord.data,
-        {
-            "battery": battery_instance_ids,
-            "multi": multi_instance_ids,
-            "pv_inverter": pv_inverter_instance_ids,
-            "tank": tank_instance_ids,
-            "solar_charger": solar_charger_instance_ids,
-        },
-    )
 
     # --- Initialize dynamic coordinators and device info per instance ---
     
@@ -687,7 +812,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "name": f"Battery {instance_id}",
                 "manufacturer": "Victron VRM API",
                 "model": f"instance_id {instance_id}",
-                "via_device": (DOMAIN, site_id),
             }
         }
 
@@ -708,7 +832,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "name": f"MultiPlus {instance_id}",
                 "manufacturer": "Victron VRM API",
                 "model": f"instance_id {instance_id}",
-                "via_device": (DOMAIN, site_id),
             }
         }
         
@@ -729,7 +852,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "name": f"PV Inverter {instance_id}",
                 "manufacturer": "Victron VRM API",
                 "model": f"instance_id {instance_id}",
-                "via_device": (DOMAIN, site_id),
             }
         }
 
@@ -753,7 +875,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "_unique_id_name": f"Tank {instance_id}",
                 "manufacturer": "Victron VRM API",
                 "model": tank_info.get("type_name") or f"instance_id {instance_id}",
-                "via_device": (DOMAIN, site_id),
             }
         }
 
@@ -774,7 +895,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "name": f"Solar Charger {instance_id}",
                 "manufacturer": "Victron VRM API",
                 "model": f"instance_id {instance_id}",
-                "via_device": (DOMAIN, site_id),
             }
         }
     
@@ -791,11 +911,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     runtime_state["diagnostics_coord"] = diagnostics_coord
     runtime_state["site_id"] = site_id
     runtime_state["managed_instances"] = {
-        category: set(device_data.get(category, {}).keys())
+        category: {
+            data.get("live_instance", configured_instance)
+            for configured_instance, data in device_data.get(category, {}).items()
+        }
         for category in _KNOWN_DEVICE_CATEGORIES
     }
-    runtime_state["known_diagnostic_ids"] = _collect_known_diagnostic_ids(device_data, diagnostics_coord.data)
-    runtime_state["dynamic_diagnostic_keys"] = set()
+    runtime_state["auxiliary_diagnostic_keys"] = set()
     runtime_state["reload_lock"] = asyncio.Lock()
 
 
@@ -808,10 +930,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "voltage": ("47", "Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:current-dc"),
         "starter_voltage": ("48", "Starter Battery Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:car-battery"),
         "current": ("49", "Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
-        "consumed": ("50", "Consumed Amphours", None, SensorStateClass.TOTAL_INCREASING, "Ah", "mdi:battery-alert-variant-outline"),
+        "consumed": ("50", "Consumed Amphours", None, SensorStateClass.MEASUREMENT, "Ah", "mdi:battery-alert-variant-outline"),
         "ttg": ("52", "Time to go", None, SensorStateClass.MEASUREMENT, "h", "mdi:timer-sand"),
-        "mid_voltage": ("64", "Mid Voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:battery-medium"),
         "charge_cycles": ("58", "Charge Cycles", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:battery-sync"),
+        "full_discharges": ("59", "Full Discharges", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:battery-arrow-down"),
+        "mid_voltage": ("64", "Automatic Syncs", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:battery-sync"),
+        "low_voltage_alarms": ("65", "Low Voltage Alarm Count", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:counter"),
+        "high_voltage_alarms": ("66", "High Voltage Alarm Count", None, SensorStateClass.TOTAL_INCREASING, None, "mdi:counter"),
+        "discharged_energy": ("244", "Discharged Energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:battery-arrow-down"),
+        "charged_energy": ("245", "Charged Energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING, "kWh", "mdi:battery-arrow-up"),
     }
     
     power_sensor_key = "power"
@@ -829,7 +956,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             # IMPORTANT: Select the correct coordinator based on sensor type
             if key == "charge_cycles":
                 active_coord = history_coord
-            elif key == "mid_voltage":
+            elif key in {
+                "full_discharges",
+                "mid_voltage",
+                "low_voltage_alarms",
+                "high_voltage_alarms",
+                "discharged_energy",
+                "charged_energy",
+            }:
                 active_coord = history_coord
             else:
                 active_coord = summary_coord
@@ -924,7 +1058,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # --- 3. MultiPlus Status Sensoren ---
     multi_status_sensors_config = {
-        "ac_in_frequency": ("6", "AC Input Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
+        "ac_in_frequency": ("14", "AC Input Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
         "ac_in_voltage_l1": ("8", "AC Input Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
         "ac_in_voltage_l2": ("9", "AC Input Voltage L2", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
         "ac_in_voltage_l3": ("10", "AC Input Voltage L3", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:transmission-tower"),
@@ -937,10 +1071,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "ac_out_voltage_l1": ("20", "AC Output Voltage L1", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
         "ac_out_voltage_l2": ("21", "AC Output Voltage L2", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
         "ac_out_voltage_l3": ("22", "AC Output Voltage L3", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT, "V", "mdi:power-socket-eu"),
-        "ac_out_frequency": ("23", "AC Output Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
-        "ac_out_current_l1": ("14", "AC Output Current L1", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
-        "ac_out_current_l2": ("15", "AC Output Current L2", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
-        "ac_out_current_l3": ("16", "AC Output Current L3", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_frequency": ("26", "AC Output Frequency", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT, "Hz", "mdi:sine-wave"),
+        "ac_out_current_l1": ("23", "AC Output Current L1", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_current_l2": ("24", "AC Output Current L2", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
+        "ac_out_current_l3": ("25", "AC Output Current L3", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-ac"),
         "ac_out_power_l1": ("29", "AC Output Power L1", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
         "ac_out_power_l2": ("30", "AC Output Power L2", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
         "ac_out_power_l3": ("31", "AC Output Power L3", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:power-socket-eu"),
@@ -948,11 +1082,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "dc_current": ("33", "DC Bus Current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT, "A", "mdi:current-dc"),
         "active_input": ("35", "Active Input Source", None, None, None, "mdi:power-plug"),
         "inverter_state": ("40", "VE.Bus State", None, None, None, "mdi:flash"),
-        "switch_position": ("44", "Switch Position", None, None, None, "mdi:light-switch"),
         "grid_setpoint": ("242", "Grid Setpoint", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W", "mdi:transmission-tower-export"),
         "soc_limit": ("243", "SOC Limit", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, "%", "mdi:battery-lock"),
         "active_soc_limit": ("244", "Active SOC Limit", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, "%", "mdi:battery-lock-open"),
-        "multi_temp": ("521", "MultiPlus Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
+        "multi_temp": ("521", "Battery Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "°C", "mdi:thermometer"),
     }
     
     multi_dc_power_key = "dc_power"
@@ -1083,16 +1216,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 entities.append(
                     VrmDiagnosticSensor(
                         diagnostics_coord, site_id, f"{key}_{instance_id}",
-                        data_id, live_id, sensor_name, device_class, state_class, unit, icon, dev_info
+                        data_id, live_id, sensor_name, device_class, state_class, unit, icon, dev_info,
+                        service_type="tank",
                     )
                 )
 
     # --- 3.9. Solar Charger Sensoren ---
     solar_charger_sensors_config = {
         "battery_voltage": ("81",  "Battery Voltage",   SensorDeviceClass.VOLTAGE,   SensorStateClass.MEASUREMENT,      "V",   "mdi:current-dc"),
-        "pv_voltage":      ("82",  "PV Voltage",        SensorDeviceClass.VOLTAGE,   SensorStateClass.MEASUREMENT,      "V",   "mdi:solar-panel"),
         "battery_temp":    ("83",  "Battery Temperature", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT,  "°C",  "mdi:thermometer"),
-        "pv_current":      ("84",  "PV Current",        SensorDeviceClass.CURRENT,   SensorStateClass.MEASUREMENT,      "A",   "mdi:current-dc"),
         "charge_state":    ("85",  "Charge State",      None,                        None,                              None,  "mdi:solar-power"),
         "error_code":      ("88",  "Error Code",        None,                        None,                              None,  "mdi:alert-circle"),
         "relay_status":    ("90",  "Relay Status",      None,                        None,                              None,  "mdi:electric-switch"),
@@ -1210,10 +1342,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         
         # Useful battery diagnostics (history/stats not in widget)
         battery_diagnostics_config = {
-            "55": ("Deepest discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-arrow-down"),
-            "56": ("Last discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-minus"),
-            "57": ("Average discharge", SensorDeviceClass.ENERGY, "Ah", "mdi:battery-50"),
-            "60": ("Total Ah drawn", SensorDeviceClass.ENERGY, "Ah", "mdi:counter"),
+            "55": ("Deepest discharge", None, "Ah", "mdi:battery-arrow-down"),
+            "56": ("Last discharge", None, "Ah", "mdi:battery-minus"),
+            "57": ("Average discharge", None, "Ah", "mdi:battery-50"),
+            "60": ("Total Ah drawn", None, "Ah", "mdi:counter"),
             "61": ("Minimum voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:battery-low"),
             "62": ("Maximum voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:battery-high"),
             "63": ("Time since last full charge", None, "s", "mdi:clock-outline"),
@@ -1221,11 +1353,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         
         # Solar charger diagnostics
         solar_diagnostics_config = {
+            "82": ("Charge Current", SensorDeviceClass.CURRENT, "A", "mdi:current-dc"),
+            "84": ("Charger Enabled", None, None, "mdi:power"),
             "86": ("PV Voltage", SensorDeviceClass.VOLTAGE, "V", "mdi:solar-panel"),
+            "95": ("Max Power Today", SensorDeviceClass.POWER, "W", "mdi:solar-power-variant"),
             "97": ("Max Power Yesterday", SensorDeviceClass.POWER, "W", "mdi:solar-power-variant"),
             "98": ("Error Code", None, None, "mdi:alert-circle"),
+            "241": ("Load State", None, None, "mdi:power-plug"),
+            "285": ("Lifetime Yield", SensorDeviceClass.ENERGY, "kWh", "mdi:solar-power"),
             "442": ("PV Power", SensorDeviceClass.POWER, "W", "mdi:solar-power"),
             "518": ("MPPT State", None, None, "mdi:state-machine"),
+            "583": ("Off Reason", None, None, "mdi:information-outline"),
         }
         
         # MultiPlus diagnostics  
@@ -1233,6 +1371,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             "27": ("Active Input Current Limit", SensorDeviceClass.CURRENT, "A", "mdi:current-ac"),
             "41": ("VE.Bus Error", None, None, "mdi:alert-circle"),
             "43": ("Low Battery", None, None, "mdi:battery-alert"),
+            "44": ("Overload", None, None, "mdi:alert"),
+            "79": ("Switch Position", None, None, "mdi:light-switch"),
+            "523": ("High DC Ripple", None, None, "mdi:sine-wave"),
             "557": ("Charge State", None, None, "mdi:battery-charging"),
         }
         
@@ -1251,7 +1392,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                                 f"diag_{data_id}_{instance_id}",
                                 data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
-                                unit, icon, dev_info
+                                unit, icon, dev_info, service_type="battery"
                             )
                         )
                         break
@@ -1271,10 +1412,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                                 f"diag_{data_id}_{instance_id}",
                                 data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
-                                unit, icon, dev_info
+                                unit, icon, dev_info, service_type="solarcharger"
                             )
                         )
                         break
+
+            if (
+                _find_diagnostic_record(diagnostics_coord.data, "86", live_id, "solarcharger")
+                and _find_diagnostic_record(diagnostics_coord.data, "442", live_id, "solarcharger")
+            ):
+                entities.append(
+                    VrmSolarPvCurrentSensor(
+                        diagnostics_coord,
+                        site_id,
+                        f"pv_current_{instance_id}",
+                        live_id,
+                        "PV Current",
+                        dev_info,
+                    )
+                )
         
         # Add MultiPlus diagnostics
         for instance_id, data in device_data["multi"].items():
@@ -1291,22 +1447,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                                 f"diag_{data_id}_{instance_id}",
                                 data_id, live_id, name,
                                 device_class, SensorStateClass.MEASUREMENT if device_class else None,
-                                unit, icon, dev_info
+                                unit, icon, dev_info, service_type="vebus"
                             )
                         )
                         break
 
     entities.extend(
-        _build_dynamic_diagnostic_entities(
+        _build_auxiliary_diagnostic_entities(
             diagnostics_coord,
             site_id,
             diagnostics_coord.data,
-            device_data,
-            runtime_state["dynamic_diagnostic_keys"],
+            runtime_state["auxiliary_diagnostic_keys"],
+            hub_device_info,
         )
     )
 
+    _cleanup_obsolete_registry_entries(
+        hass,
+        entry,
+        {entity.unique_id for entity in entities if entity.unique_id is not None},
+    )
     async_add_entities(entities, True)
+
+    def _diagnostics_listener() -> None:
+        new_entities = _build_auxiliary_diagnostic_entities(
+            diagnostics_coord,
+            site_id,
+            diagnostics_coord.data,
+            runtime_state["auxiliary_diagnostic_keys"],
+            hub_device_info,
+        )
+        if new_entities:
+            async_add_entities(new_entities, True)
+
+    unsub_diagnostics = diagnostics_coord.async_add_listener(_diagnostics_listener)
+    entry.async_on_unload(unsub_diagnostics)
 
     if config_data.get(CONF_RUNTIME_DISCOVERY, "enabled") == RUNTIME_DISCOVERY_DISABLED:
         return
@@ -1324,7 +1499,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         site_id,
         token,
         runtime_state["managed_instances"],
-        runtime_state["known_diagnostic_ids"],
     )
     runtime_state["runtime_discovery_coord"] = runtime_discovery_coord
 
@@ -1346,17 +1520,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 hass.config_entries.async_update_entry(entry, data=updated_data)
                 hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
                 return
-
-            new_dynamic_entities = _build_dynamic_diagnostic_entities(
-                diagnostics_coord,
-                site_id,
-                runtime_discovery_coord._diagnostics_coord.data,
-                device_data,
-                runtime_state["dynamic_diagnostic_keys"],
-            )
-            if new_dynamic_entities:
-                _LOGGER.info("Runtime discovery adding %d new diagnostics sensors.", len(new_dynamic_entities))
-                async_add_entities(new_dynamic_entities, True)
 
     def _runtime_discovery_listener() -> None:
         hass.async_create_task(_process_runtime_discovery_update())
@@ -1701,6 +1864,40 @@ class VrmSolarChargerSensor(VrmBaseSensor):
             return value_enum
         return attr.get("value")
 
+
+class VrmSolarPvCurrentSensor(VrmBaseSensor):
+    """Calculate PV input current from diagnostics PV power and voltage."""
+
+    def __init__(self, coordinator, site_id, key, instance, name, device_info):
+        super().__init__(
+            coordinator,
+            site_id,
+            key,
+            name,
+            SensorDeviceClass.CURRENT,
+            SensorStateClass.MEASUREMENT,
+            "A",
+            "mdi:current-dc",
+            device_info,
+        )
+        self._instance = instance
+
+    @property
+    def native_value(self):
+        pv_power = _diagnostic_numeric_value(
+            _find_diagnostic_record(self.coordinator.data, "442", self._instance, "solarcharger")
+        )
+        pv_voltage = _diagnostic_numeric_value(
+            _find_diagnostic_record(self.coordinator.data, "86", self._instance, "solarcharger")
+        )
+        if pv_power is None or pv_voltage is None or pv_voltage <= 0:
+            return None
+        return round(pv_power / pv_voltage, 2)
+
+    @property
+    def extra_state_attributes(self):
+        return {"source": "calculated from PV power / PV voltage"}
+
 # --- 12. System Overview Sensor (NEU) ----------------------------------------
 class VrmSystemOverviewSensor(VrmBaseSensor):
     """Represents a generic value from the System Overview data."""
@@ -1756,10 +1953,25 @@ class VrmSystemOverviewSensor(VrmBaseSensor):
 # --- 13. NEW: Diagnostic Sensor (from diagnostics endpoint) -------------------
 class VrmDiagnosticSensor(VrmBaseSensor):
     """Represents a sensor from the VRM diagnostics endpoint."""
-    def __init__(self, coordinator, site_id, key, data_id, instance, name, device_class, state_class, unit, icon, device_info):
+    def __init__(
+        self,
+        coordinator,
+        site_id,
+        key,
+        data_id,
+        instance,
+        name,
+        device_class,
+        state_class,
+        unit,
+        icon,
+        device_info,
+        service_type=None,
+    ):
         super().__init__(coordinator, site_id, key, name, device_class, state_class, unit, icon, device_info)
         self._data_id = str(data_id)
         self._instance = instance
+        self._service_type = service_type
 
     @property
     def native_value(self):
@@ -1771,7 +1983,8 @@ class VrmDiagnosticSensor(VrmBaseSensor):
         # Find matching record by data_id and instance
         for record in records:
             if (str(record.get("idDataAttribute")) == self._data_id and 
-                record.get("instance") == self._instance):
+                record.get("instance") == self._instance and
+                (self._service_type is None or record.get("dbusServiceType") == self._service_type)):
                 
                 raw = record.get("rawValue")
 
@@ -1786,10 +1999,10 @@ class VrmDiagnosticSensor(VrmBaseSensor):
 
                 # Numeric: try formattedValue first (includes unit)
                 formatted = record.get("formattedValue")
-                if formatted:
+                if formatted not in (None, ""):
                     try:
-                        return float(formatted.split()[0])
-                    except (ValueError, IndexError):
+                        return float(str(formatted).split()[0])
+                    except (TypeError, ValueError, IndexError):
                         return formatted
                 
                 # Fallback to rawValue

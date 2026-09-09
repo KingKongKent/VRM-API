@@ -66,6 +66,8 @@ Base URL: `https://vrmapi.victronenergy.com/v2/installations/{site_id}/`
 | `widgets/TankSummary` | Tank status | `DEFAULT_SCAN_INTERVAL_TANK` |
 | `diagnostics` tank records | Tank discovery and fallback values when tanks are absent from system-overview/widgets | `DEFAULT_SCAN_INTERVAL_OVERALL` |
 | `widgets/SolarChargerSummary` | Solar charger status | `DEFAULT_SCAN_INTERVAL_SOLAR_CHARGER` |
+| `diagnostics` switch/digitalinput/temperature records | Expansion I/O, digital input, temperature and humidity values | `DEFAULT_SCAN_INTERVAL_OVERALL` |
+| `diagnostics` gateway/system records | Curated system health, storage, relay and aggregate power values | `DEFAULT_SCAN_INTERVAL_OVERALL` |
 
 ## Instance Remap Design
 
@@ -84,6 +86,11 @@ Remap inputs:
 - Fetch `system-overview` and `diagnostics` before dynamic widget coordinators.
 - Use diagnostics timestamps for stale-instance detection when possible.
 - Discover tanks from diagnostics because VRM may collect tank data without listing the tank in `system-overview`.
+- Current live payloads use system-overview type `3` for Expansion I/O, type `5` for tanks, and type `20` for digital inputs. Do not infer a category from historical numeric mappings alone.
+- Match diagnostics by `dbusServiceType`, instance, and attribute ID; IDs are not globally unique across services.
+- Promote only curated operational diagnostics with meaningful names, classes, and units. Setup removes registry entries that are no longer part of the active entity set and then removes empty integration-owned devices.
+- Solar diagnostics ID `82` is charger output current and ID `84` is charger on/off. PV input current is calculated from PV power `442` divided by PV voltage `86`.
+- Remap configured identities before merging discovered instances, and do not create a second entity for a live ID already claimed as a remap target.
 - Resolve enums through `dataAttributeEnumValues` and raw enum values before falling back to formatted text.
 - Create sensors only when the API actually returns data for the relevant attribute.
 - Keep HTTP calls async through Home Assistant's managed aiohttp session with a 15 second timeout.

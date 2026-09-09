@@ -38,6 +38,7 @@ desktop.ini
 # ---------- Test / dev artefacts ----------
 tests/test_*.py
 !tests/test_vrm_api.py
+!tests/test_sensor_logic.py
 api_data_*/
 *.tmp
 hacs.json.tmp

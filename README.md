@@ -10,11 +10,13 @@ Victron VRM API Integration for Home Assistant
 This integration uses the [Victron VRM Portal](https://vrm.victronenergy.com/) to get data from the API. All you need for setup are some numbers from your VRM Portal.
 It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You also get Overall Stats for the Day, Week, Month, and Year, plus System Overview information and Diagnostics for all detected devices.
 
-### Key Features (v1.6.1)
+### Key Features (v1.6.3)
 - **134+ sensors** — Battery, MultiPlus, PV Inverter, Tank, Solar Charger, Overall Stats, System Overview, Diagnostics
 - **Instance auto-remap** — If VRM reassigns a device instance ID (e.g., after Cerbo restart), the integration detects this automatically and queries the correct live instance. Your dashboards stay stable.
 - **Reliable enum values** — Charge State, VE.Bus State, and similar status sensors always show the correct value, even when VRM's server-side cache is stale.
 - **Tank diagnostics discovery** — Fresh water and other tank sensors can be discovered from diagnostics when VRM does not list them in System Overview.
+- **Operational I/O diagnostics** — Expansion I/O, digital inputs, temperature/humidity probes, and Gateway/System health values are discovered from diagnostics.
+- **Complete solar current** — Exposes charger output current directly and calculates PV input current from PV power and voltage.
 - **Smart sensor creation** — Only creates sensor entities when the VRM API actually returns data for them.
 
 > 📖 **[Full Documentation](docs/documentation.md)** — Detailed API reference, architecture guide, troubleshooting, and development instructions.
@@ -33,6 +35,10 @@ It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You
 | **PV Inverter** | 16 |
 | **Tank** | 6 |
 | **Solar Charger** | 11 |
+| **Expansion I/O** | 1 per output |
+| **Digital Input** | up to 4 per input |
+| **Temperature** | up to 2 per probe |
+| **Gateway/System** | operational health and power values |
 | **Overall Stats** | 16 |
 | **System Overview** | 10 per device |
 | **Total** | 134+ |
@@ -135,11 +141,13 @@ It reads data from Battery, MultiPlus, PV Inverter, Tank, and Solar Charger. You
 | **Tank** | Custom Name | `638` | - | User Defined Name |
 | --- | --- | --- | --- | --- |
 | **Solar Charger** | Battery Voltage | `81` | V | Battery Voltage |
-| **Solar Charger** | PV Voltage | `82` | V | Solar Panel Voltage |
+| **Solar Charger** | Charge Current | `82` diagnostics | A | Charger output current |
+| **Solar Charger** | PV Voltage | `86` diagnostics | V | Solar panel voltage |
 | **Solar Charger** | Battery Temperature | `83` | °C | Battery Temperature (external) |
-| **Solar Charger** | PV Current | `84` | A | Solar Panel Current |
+| **Solar Charger** | PV Current | `442 / 86` | A | Calculated panel current from PV power and voltage |
 | **Solar Charger** | Charge State | `85` | - | Charger State (e.g., Bulk, Float) |
-| **Solar Charger** | Error Code | `88` | - | Error Code (if any) |
+| **Solar Charger** | Charger Enabled | `84` diagnostics | - | Charger on/off state |
+| **Solar Charger** | Error Code | `98` diagnostics | - | Error Code (if any) |
 | **Solar Charger** | Relay Status | `90` | - | Relay State |
 | **Solar Charger** | Yield Today | `94` | kWh | Energy Yield Today |
 | **Solar Charger** | Max Power Today | `95` | W | Maximum Power Today |

@@ -35,9 +35,13 @@ git diff --cached | Select-String -Pattern "token|secret|password|X-Authorizatio
 | VRM `formattedValue` can be stale | Resolve enums from `dataAttributeEnumValues` plus raw enum value first |
 | `system-overview` may list stale and live instances at the same time | Use diagnostics timestamps to choose the freshest instance |
 | VRM may collect tanks in diagnostics without listing them in `system-overview` | Discover tank instances from diagnostics and use diagnostics fallback sensors |
-| Too many 20 second coordinators can trigger HTTP 429 | Keep scan intervals conservative and document any changes |
+| Too many coordinators can trigger HTTP 429 | Keep scan intervals conservative and surface VRM's `Retry-After` guidance |
+| Diagnostics include IPs, GPS coordinates, serials, and hashes | Keep raw inventories ignored and promote only curated operational fields |
 | Local deploy scripts can contain HA IPs or usernames | Keep target-specific scripts ignored; commit only generic script docs |
 | HA config entry storage should not be treated as a public file | Avoid printing config data and keep HA backups protected |
+| Backup folders under `custom_components` are treated as integrations | Store backups outside `custom_components` |
+| Current HA rejects legacy `DeviceInfo.via_device` tuples | Omit the optional parent link; stable identifiers still group devices |
+| Unbounded diagnostics create duplicate, opaque entities | Use curated diagnostics only and remove obsolete config-entry registry entries during setup |
 
 ## Security Review Checklist
 
